@@ -10,7 +10,9 @@
 //! file info (format, duration, size). Video files open read-only on a
 //! player page with a picture (`gtk::Video` driven by `gtk::MediaFile`):
 //! play/pause, seek, volume plus file info (format, resolution when cheap,
-//! duration, size). Anything else is rejected as
+//! duration, size). Word documents open read-only as formatted text:
+//! `.docx` fully, `.odt` and `.rtf` on a best-effort basis, legacy `.doc`
+//! with an honest hint (see `wiki/Docx.md`). Anything else is rejected as
 //! unsupported with a hint (binary files are never loaded as text).
 
 use std::path::{Path, PathBuf};
@@ -31,7 +33,10 @@ pub enum FileKind {
   /// Video: read-only player with a picture (play/pause, seek, volume,
   /// file info with resolution when cheap).
   Video,
-  /// Not supported yet (office, binary).
+  /// Document: read-only formatted text (`.docx` fully, `.odt`/`.rtf`
+  /// best-effort, legacy `.doc` with an honest hint).
+  Document,
+  /// Not supported yet (spreadsheets, presentations, binary).
   Unsupported,
 }
 
@@ -72,6 +77,11 @@ pub const VIDEO_EXTENSIONS: &[&str] = &[
   "mp4", "m4v", "mkv", "webm", "mov", "avi", "ogv", "flv", "wmv", "mpg", "mpeg", "3gp",
 ];
 
+/// Word documents open read-only as formatted text (see `wiki/Docx.md`).
+/// `.docx` is parsed fully, `.odt` and `.rtf` on a best-effort basis,
+/// legacy `.doc` (OLE) shows an honest hint since no decoder is available.
+pub const DOCUMENT_EXTENSIONS: &[&str] = &["docx", "odt", "rtf", "doc"];
+
 /// Max file size loaded as text in the basis version (8 MiB).
 pub const MAX_TEXT_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -97,6 +107,9 @@ pub fn classify(path: &Path) -> FileKind {
   if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Video;
   }
+  if DOCUMENT_EXTENSIONS.contains(&ext.as_str()) {
+    return FileKind::Document;
+  }
   if TEXT_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Text;
   }
@@ -112,13 +125,21 @@ pub fn classify(path: &Path) -> FileKind {
 /// right page: when the extension does not say image but the file header
 /// carries known image magic, the file is treated as an image; when the
 /// header carries known audio magic, the file is treated as audio; when it
-/// carries known video magic, it is treated as video. Other kinds are never
+/// carries known video magic, it is treated as video; when it carries known
+/// document magic (Word ZIP package, ODT package, RTF markup or legacy OLE),
+/// it is treated as a document. Other kinds are never
 /// changed by sniffing. Audio sniffing wins over video sniffing for shared
 /// containers (Ogg, ASF) since their headers cannot name the stream type
 /// cheaply; the `.ogv` and `.wmv` extensions still route to video first.
+/// Document sniffing only matches Word/ODT packages (never other ZIP files
+/// such as spreadsheets or presentations), RTF markup and OLE bytes.
 pub fn classify_file(path: &Path) -> FileKind {
   let by_ext = classify(path);
-  if by_ext == FileKind::Image || by_ext == FileKind::Audio || by_ext == FileKind::Video {
+  if by_ext == FileKind::Image
+    || by_ext == FileKind::Audio
+    || by_ext == FileKind::Video
+    || by_ext == FileKind::Document
+  {
     return by_ext;
   }
   let Ok(bytes) = read_prefix(path, 4096) else {
@@ -132,6 +153,9 @@ pub fn classify_file(path: &Path) -> FileKind {
   }
   if sniff_video(&bytes) {
     return FileKind::Video;
+  }
+  if sniff_document(&bytes) {
+    return FileKind::Document;
   }
   by_ext
 }
@@ -389,6 +413,64 @@ fn is_mpeg_ps_magic(bytes: &[u8]) -> bool {
     && bytes[1] == 0x00
     && bytes[2] == 0x01
     && (bytes[3] == 0xBA || bytes[3] == 0xB3)
+}
+
+/// Returns true when the bytes carry known word-document magic (see
+/// `wiki/Docx.md` for the coverage table): a ZIP package (`PK\x03\x04`)
+/// holding `word/` parts (`.docx`), an ODT package (ZIP plus the
+/// OpenDocument text MIME type), RTF markup (`{\rtf`) or a legacy OLE
+/// compound file (`.doc`, also used by password-protected OOXML packages).
+/// Other ZIP files (spreadsheets, presentations, jars) never match.
+pub fn sniff_document(bytes: &[u8]) -> bool {
+  is_docx_zip(bytes) || is_odt_zip(bytes) || is_rtf_markup(bytes) || is_ole_magic(bytes)
+}
+
+/// ZIP local file header signature (`PK\x03\x04`).
+fn is_zip_magic(bytes: &[u8]) -> bool {
+  bytes.starts_with(&[0x50, 0x4B, 0x03, 0x04])
+}
+
+/// `.docx` package: ZIP magic plus a `word/` part name in the prefix. The
+/// 4 KiB prefix holds the first local headers, so misnamed packages still
+/// match; other OOXML packages (`xl/`, `ppt/`) never match.
+fn is_docx_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"word/").is_some()
+}
+
+/// ODT package: ZIP magic plus the OpenDocument text MIME type of the
+/// leading stored `mimetype` entry.
+fn is_odt_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"application/vnd.oasis.opendocument.text").is_some()
+}
+
+/// RTF markup starts with `{\rtf` (an optional BOM is not expected here;
+/// RTF files are plain ASCII).
+pub fn is_rtf_markup(bytes: &[u8]) -> bool {
+  bytes.starts_with(b"{\\rtf") || bytes.starts_with(b"{\\RTF")
+}
+
+/// OLE compound file magic used by legacy `.doc` files (and by
+/// password-protected OOXML packages, which are OLE files as well).
+fn is_ole_magic(bytes: &[u8]) -> bool {
+  bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
+}
+
+/// Short display label for a document extension (lowercase, without dot).
+/// Unknown extensions report `Document` so sniffed files still get a label.
+pub fn document_format_label(ext: &str) -> &'static str {
+  match ext {
+    "docx" => "DOCX",
+    "odt" => "ODT",
+    "rtf" => "RTF",
+    "doc" => "DOC",
+    _ => "Document",
+  }
 }
 
 /// Short display label for an audio extension (lowercase, without dot).
@@ -1377,7 +1459,82 @@ mod tests {
   fn unsupported_classified() {
     assert_eq!(classify(Path::new("sheet.xlsx")), FileKind::Unsupported);
     assert_eq!(classify(Path::new("slides.pptx")), FileKind::Unsupported);
-    assert_eq!(classify(Path::new("doc.docx")), FileKind::Unsupported);
+    assert_eq!(classify(Path::new("archive.zip")), FileKind::Unsupported);
+  }
+
+  #[test]
+  fn document_extensions_classified() {
+    for name in [
+      "doc.docx",
+      "doc.DOCX",
+      "text.odt",
+      "text.ODT",
+      "notes.rtf",
+      "notes.RTF",
+      "legacy.doc",
+      "legacy.DOC",
+    ] {
+      assert_eq!(classify(Path::new(name)), FileKind::Document, "failed for {name}");
+    }
+  }
+
+  #[test]
+  fn document_magic_sniffed() {
+    // Minimal .docx local header with a `word/` part name.
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    assert!(sniff_document(&docx));
+    // Minimal ODT: ZIP magic plus the OpenDocument text MIME type.
+    let mut odt = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    odt.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.text");
+    assert!(sniff_document(&odt));
+    assert!(sniff_document(b"{\\rtf1\\ansi hello}"));
+    assert!(sniff_document(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]));
+    // Never a document: other ZIP files, spreadsheets and presentations.
+    let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
+    assert!(!sniff_document(&xlsx));
+    let mut pptx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    pptx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00ppt/presentation.xml");
+    assert!(!sniff_document(&pptx));
+    assert!(!sniff_document(b"PK\x03\x04plain zip without office parts"));
+    assert!(!sniff_document(b"hello world"));
+    assert!(!sniff_document(b"%PDF-1.4"));
+    assert!(!sniff_document(b""));
+  }
+
+  #[test]
+  fn misnamed_document_sniffed_as_document() {
+    let dir = std::env::temp_dir().join("preview-doc-test");
+    let _ = std::fs::create_dir_all(&dir);
+    // RTF markup without any extension still opens as a document.
+    let no_ext = dir.join("misnamed-no-ext-doc");
+    std::fs::write(&no_ext, b"{\\rtf1\\ansi hello}").expect("write rtf magic");
+    assert_eq!(classify_file(&no_ext), FileKind::Document);
+    // DOCX bytes behind a `.bin` extension still open as a document.
+    let bin_ext = dir.join("misnamed-doc.bin");
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    std::fs::write(&bin_ext, docx).expect("write docx magic");
+    assert_eq!(classify_file(&bin_ext), FileKind::Document);
+    // A spreadsheet package behind a `.bin` extension stays unsupported.
+    let sheet_ext = dir.join("misnamed-sheet.bin");
+    let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
+    std::fs::write(&sheet_ext, xlsx).expect("write xlsx magic");
+    assert_eq!(classify_file(&sheet_ext), FileKind::Unsupported);
+    let _ = std::fs::remove_file(&no_ext);
+    let _ = std::fs::remove_file(&bin_ext);
+    let _ = std::fs::remove_file(&sheet_ext);
+  }
+
+  #[test]
+  fn document_format_labels() {
+    assert_eq!(document_format_label("docx"), "DOCX");
+    assert_eq!(document_format_label("odt"), "ODT");
+    assert_eq!(document_format_label("rtf"), "RTF");
+    assert_eq!(document_format_label("doc"), "DOC");
+    assert_eq!(document_format_label("bin"), "Document");
   }
 
   #[test]

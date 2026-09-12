@@ -23,6 +23,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Image | [Image.md](Image.md) | Read-only picture viewer with zoom and fit window |
 | Audio | [Audio.md](Audio.md) | Read-only audio player with play/pause, seek, volume and file info |
 | Video | [Video.md](Video.md) | Read-only video player with picture, play/pause, seek, volume and file info |
+| Docx | [Docx.md](Docx.md) | Read-only word document viewer with formatted text, lists and tables |
 
 ## Quick Start
 
@@ -72,3 +73,10 @@ See [Preview.md](Preview.md) for details.
   `video.*` and `status.video` keys in `lang/en_us.json` and
   `lang/de_de.json`; needs GStreamer codec plugins on the system, see
   `wiki/Video.md`).
+- 2026-09-12: Docx support (read-only word document page with formatted
+  text, headings, bold/italic, bulleted lists and tables as a plain grid;
+  `docx` fully plus `odt` and `rtf` best-effort plus an honest hint for
+  legacy `doc`, magic-byte sniffing, corrupt/password/oversized hints,
+  `docx.*` and `status.docx` keys in `lang/en_us.json` and
+  `lang/de_de.json`; `flate2` and `quick-xml` are now direct dependencies
+  from the existing lock closure, see `wiki/Docx.md`).

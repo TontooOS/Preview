@@ -49,5 +49,8 @@
   "video.position": "%elapsed% / %total%",
   "video.load_failed": "Cannot play this video file: %reason%",
   "video.audio_only": "This file has audio but no video track",
-  "status.video": "%format%, %resolution%%duration%, %size%, read-only"
+  "status.video": "%format%, %resolution%%duration%, %size%, read-only",
+  "docx.load_failed": "Cannot open this document: %reason%",
+  "docx.truncated": "Large document: showing the first %count% blocks",
+  "status.docx": "%format%, %paragraphs% paragraphs, %words% words, %size%, read-only"
 }

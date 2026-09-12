@@ -10,6 +10,7 @@
 //! or the native file dialog. Follows the live system color scheme
 //! (Dark `#1d1d1d`, Light `#ececec`).
 
+mod docx;
 mod lang;
 mod markdown;
 mod model;

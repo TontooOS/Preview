@@ -9,6 +9,8 @@ Images open read-only as pictures (see [Image.md](Image.md)).
 Audio files open read-only in a compact player (see [Audio.md](Audio.md)).
 Video files open read-only on a player page with a picture
 (see [Video.md](Video.md)).
+Word documents open read-only as formatted text
+(see [Docx.md](Docx.md)).
 Saving is manual only. Unsupported files show a hint page instead of
 binary garbage.
 
@@ -17,7 +19,7 @@ binary garbage.
 From top to bottom the window contains:
 
 1. Header row: title plus subtitle on the left, actions on the right
-2. Content stack: empty, text (edit/preview), pdf, image, audio, video, or unsupported page
+2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, or unsupported page
 3. Status line: line count and save state
 
 ```rust
@@ -38,7 +40,8 @@ app.run();
 | `Image` | `png`, `jpg`, `gif`, `bmp`, `webp`, `tiff`, `svg`, `ico`, `avif`, ... | Read-only picture viewer (see [Image.md](Image.md)) |
 | `Audio` | `mp3`, `wav`, `flac`, `ogg`, `oga`, `opus`, `m4a`, `aac`, `wma`, `aiff`, `aif` | Read-only player (see [Audio.md](Audio.md)) |
 | `Video` | `mp4`, `m4v`, `mkv`, `webm`, `mov`, `avi`, `ogv`, `flv`, `wmv`, `mpg`, `mpeg`, `3gp` | Read-only player with picture (see [Video.md](Video.md)) |
-| `Unsupported` | `xlsx`, `docx`, ... | Hint page, no binary load |
+| `Document` | `docx`, `odt`, `rtf`, `doc` | Read-only formatted text (see [Docx.md](Docx.md)) |
+| `Unsupported` | `xlsx`, `pptx`, ... | Hint page, no binary load |
 
 ```rust
 pub fn classify(path: &Path) -> FileKind;
@@ -138,3 +141,4 @@ system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 - [Image.md](Image.md) – read-only picture viewer
 - [Audio.md](Audio.md) – read-only audio player
 - [Video.md](Video.md) – read-only video player
+- [Docx.md](Docx.md) – read-only word document viewer

@@ -49,5 +49,8 @@
   "video.position": "%elapsed% / %total%",
   "video.load_failed": "Diese Videodatei kann nicht abgespielt werden: %reason%",
   "video.audio_only": "Diese Datei enthält Audio, aber keine Videospur",
-  "status.video": "%format%, %resolution%%duration%, %size%, schreibgeschützt"
+  "status.video": "%format%, %resolution%%duration%, %size%, schreibgeschützt",
+  "docx.load_failed": "Dieses Dokument kann nicht geöffnet werden: %reason%",
+  "docx.truncated": "Großes Dokument: die ersten %count% Blöcke werden gezeigt",
+  "status.docx": "%format%, %paragraphs% Absätze, %words% Wörter, %size%, schreibgeschützt"
 }

@@ -10,9 +10,12 @@
 //! (`gtk::MediaFile` with play/pause, seek slider, volume plus file
 //! info). Video files open read-only on a player page with a picture
 //! (`gtk::Video` driven by `gtk::MediaFile` with play/pause, seek slider,
-//! volume plus file info). Saving is manual only (`Save` button, `Ctrl+S`,
+//! volume plus file info). Word documents open read-only as formatted text
+//! (`.docx` fully, `.odt`/`.rtf` best-effort, legacy `.doc` with an honest
+//! hint). Saving is manual only (`Save` button, `Ctrl+S`,
 //! close dialog with Cancel / Save / Don't Save).
 
+use crate::docx;
 use crate::lang;
 use crate::markdown;
 use crate::model::{self, FileKind};
@@ -56,6 +59,8 @@ struct State {
   video_media: Option<gtk::MediaFile>,
   video_tick: Option<glib::SourceId>,
   video_volume: f64,
+  doc_doc: Option<docx::Document>,
+  doc_error: Option<String>,
 }
 
 impl State {
@@ -86,6 +91,8 @@ impl State {
       video_media: None,
       video_tick: None,
       video_volume: 1.0,
+      doc_doc: None,
+      doc_error: None,
     }
   }
 }
@@ -146,6 +153,12 @@ struct Widgets {
   video_vol_row: gtk::Box,
   video_error_lbl: gtk::Label,
   video_controls: gtk::Box,
+  doc_title: gtk::Label,
+  doc_info: gtk::Label,
+  doc_scroll: gtk::ScrolledWindow,
+  doc_view: gtk::TextView,
+  doc_buffer: gtk::TextBuffer,
+  doc_error_lbl: gtk::Label,
   root: gtk::Box,
 }
 
@@ -525,6 +538,50 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   video_box.append(&video_error_lbl);
   stack.add_named(&video_box, Some("video"));
 
+  // Document page: title plus file info plus a read-only formatted view
+  // (headings, bold/italic, bullets, tables as a plain grid). Broken or
+  // unsupported documents (corrupt, password-protected, legacy `.doc`)
+  // stay on this page and show an error hint with the reason.
+  let doc_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  doc_box.set_hexpand(true);
+  doc_box.set_vexpand(true);
+  let doc_title = gtk::Label::new(Some(""));
+  doc_title.add_css_class("docx-title");
+  doc_title.set_margin_top(12);
+  let doc_info = gtk::Label::new(Some(""));
+  doc_info.add_css_class("dim-label");
+  doc_info.set_wrap(true);
+  doc_info.set_justify(gtk::Justification::Center);
+  doc_info.set_margin_bottom(4);
+  doc_box.append(&doc_title);
+  doc_box.append(&doc_info);
+  let doc_buffer = gtk::TextBuffer::new(None);
+  let doc_view = gtk::TextView::with_buffer(&doc_buffer);
+  doc_view.set_editable(false);
+  doc_view.set_cursor_visible(false);
+  doc_view.set_wrap_mode(gtk::WrapMode::WordChar);
+  doc_view.set_hexpand(true);
+  doc_view.set_vexpand(true);
+  doc_view.set_left_margin(16);
+  doc_view.set_right_margin(16);
+  doc_view.set_top_margin(12);
+  doc_view.set_bottom_margin(12);
+  let doc_scroll = gtk::ScrolledWindow::new();
+  doc_scroll.set_hexpand(true);
+  doc_scroll.set_vexpand(true);
+  doc_scroll.set_child(Some(&doc_view));
+  doc_box.append(&doc_scroll);
+  let doc_error_lbl = gtk::Label::new(Some(""));
+  doc_error_lbl.add_css_class("dim-label");
+  doc_error_lbl.set_wrap(true);
+  doc_error_lbl.set_justify(gtk::Justification::Center);
+  doc_error_lbl.set_halign(gtk::Align::Center);
+  doc_error_lbl.set_valign(gtk::Align::Center);
+  doc_error_lbl.set_hexpand(true);
+  doc_error_lbl.set_vexpand(true);
+  doc_box.append(&doc_error_lbl);
+  stack.add_named(&doc_box, Some("docx"));
+
   root.append(&stack);
 
   // Status line.
@@ -604,6 +661,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     video_vol_row: video_vol_row.clone(),
     video_error_lbl: video_error_lbl.clone(),
     video_controls: video_controls.clone(),
+    doc_title: doc_title.clone(),
+    doc_info: doc_info.clone(),
+    doc_scroll: doc_scroll.clone(),
+    doc_view: doc_view.clone(),
+    doc_buffer: doc_buffer.clone(),
+    doc_error_lbl: doc_error_lbl.clone(),
     root: root.clone(),
   });
 
@@ -951,7 +1014,8 @@ fn base_css() -> String {
      .audio-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
      .video-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
-     .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}"
+     .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
+     .docx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
   )
 }
 
@@ -1033,6 +1097,10 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   // Switching files always stops media playback first.
   stop_audio(state);
   stop_video(state, widgets);
+  // Switching files always drops the previous document, so stale blocks
+  // never leak into another file (every branch below sets its own kind).
+  state.borrow_mut().doc_doc = None;
+  state.borrow_mut().doc_error = None;
   // Extension first, image/audio/video magic bytes second so misnamed
   // files still land on the picture viewer or a player instead of the
   // unsupported page.
@@ -1252,6 +1320,55 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     }
     return;
   }
+  if kind == FileKind::Document {
+    match docx::load_document(path) {
+      Ok(doc) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.doc_doc = Some(doc);
+        st.doc_error = None;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.doc_doc = None;
+        st.doc_error = Some(reason);
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
   match model::load_text(path) {
     Ok(text) => {
       let mut st = state.borrow_mut();
@@ -1297,12 +1414,13 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
 }
 
 /// Persist the edit buffer back to disk (manual save only, never for PDFs,
-/// images, audio or video files).
+/// images, audio, video or document files).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if state.borrow().kind == FileKind::Pdf
     || state.borrow().kind == FileKind::Image
     || state.borrow().kind == FileKind::Audio
     || state.borrow().kind == FileKind::Video
+    || state.borrow().kind == FileKind::Document
   {
     return;
   }
@@ -1342,6 +1460,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let is_image = has_file && st.kind == FileKind::Image;
   let is_audio = has_file && st.kind == FileKind::Audio;
   let is_video = has_file && st.kind == FileKind::Video;
+  let is_doc = has_file && st.kind == FileKind::Document;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -1406,6 +1525,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     widgets.status.set_text(&audio_status_text(&st));
   } else if is_video {
     widgets.status.set_text(&video_status_text(&st));
+  } else if is_doc {
+    widgets.status.set_text(&doc_status_text(&st));
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -1425,6 +1546,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "audio"
   } else if st.kind == FileKind::Video {
     "video"
+  } else if st.kind == FileKind::Document {
+    "docx"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -1459,6 +1582,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Video {
     drop(st);
     refresh_video(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Document {
+    drop(st);
+    refresh_docx(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -2091,6 +2219,61 @@ fn update_video_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let status = video_status_text(&state.borrow());
   widgets.video_info.set_text(&status);
   widgets.status.set_text(&status);
+}
+
+/// Status line for documents: format, paragraph and word counts plus file
+/// size, or the load reason when the file could not be parsed.
+fn doc_status_text(st: &State) -> String {
+  match st.doc_doc.as_ref() {
+    Some(doc) => lang::t_with(
+      "status.docx",
+      &[
+        ("format", doc.format.as_str()),
+        ("paragraphs", &doc.paragraph_count().to_string()),
+        ("words", &doc.word_count().to_string()),
+        ("size", model::format_file_size(doc.file_bytes).as_str()),
+      ],
+    ),
+    None => {
+      let reason = st.doc_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+      lang::t_with("docx.load_failed", &[("reason", &reason)])
+    }
+  }
+}
+
+/// Build the document page: title, info line and the formatted read-only
+/// view, or the load error hint. Broken documents stay on the document page
+/// and never fall through to the unsupported page.
+fn refresh_docx(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let name = {
+    let st = state.borrow();
+    st.path.as_ref().map(|p| model::display_name(p)).unwrap_or_default()
+  };
+  widgets.doc_title.set_text(&name);
+  if state.borrow().doc_doc.is_none() {
+    let reason = state
+      .borrow()
+      .doc_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.doc_title.set_visible(false);
+    widgets.doc_info.set_visible(false);
+    widgets.doc_scroll.set_visible(false);
+    widgets.doc_error_lbl.set_visible(true);
+    widgets.doc_error_lbl.set_text(&lang::t_with(
+      "docx.load_failed",
+      &[("reason", &reason)],
+    ));
+    return;
+  }
+  widgets.doc_title.set_visible(true);
+  widgets.doc_info.set_visible(true);
+  widgets.doc_scroll.set_visible(true);
+  widgets.doc_error_lbl.set_visible(false);
+  widgets.doc_info.set_text(&doc_status_text(&state.borrow()));
+  if let Some(doc) = state.borrow().doc_doc.clone() {
+    docx::render_into(&widgets.doc_buffer, &doc);
+  }
 }
 
 fn update_gutter(widgets: &Widgets) {
