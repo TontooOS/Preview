@@ -1,10 +1,11 @@
-//! Preview: TontooOS document viewer basis built with TontooUI.
+//! Preview: TontooOS document viewer built with TontooUI.
 //!
 //! Empty state with a centered open button; text files (`.txt`, `.py`,
 //! `.json`, ...) open as editable text with line numbers; Markdown gets
-//! a rendered preview plus raw edit mode. Saving is manual only (`Save`,
-//! `Ctrl+S`, close dialog). Opens via CLI (`preview /path/to/file`) or
-//! the native file dialog. Follows the live system color scheme
+//! a rendered preview plus raw edit mode; PDFs open read-only with page
+//! navigation, page indicator, zoom and fit width. Saving is manual only
+//! (`Save`, `Ctrl+S`, close dialog). Opens via CLI (`preview /path/to/file`)
+//! or the native file dialog. Follows the live system color scheme
 //! (Dark `#1d1d1d`, Light `#ececec`).
 
 mod lang;

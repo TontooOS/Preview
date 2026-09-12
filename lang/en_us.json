@@ -20,5 +20,14 @@
   "status.unsupported": "Format not supported yet",
   "status.dirty": "%lines% lines, unsaved changes",
   "status.saved": "%lines% lines",
-  "status.save_failed": "Save failed: %reason%"
+  "status.save_failed": "Save failed: %reason%",
+  "pdf.prev": "Previous",
+  "pdf.next": "Next",
+  "pdf.page": "Page %page% of %total%",
+  "pdf.zoom_in": "Zoom In",
+  "pdf.zoom_out": "Zoom Out",
+  "pdf.fit": "Fit Width",
+  "pdf.load_failed": "Cannot open this PDF: %reason%",
+  "pdf.empty_page": "This page contains no extractable text.",
+  "status.pdf": "%count% pages, read-only"
 }

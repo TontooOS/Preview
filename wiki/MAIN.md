@@ -19,6 +19,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Main index | [MAIN.md](MAIN.md) | This page |
 | Rules | [RULE.md](RULE.md) | Development and usage rules |
 | Preview | [Preview.md](Preview.md) | Text viewer, Markdown preview/edit, manual save and localization |
+| Pdf | [Pdf.md](Pdf.md) | Read-only PDF page viewer with navigation, zoom and fit width |
 
 ## Quick Start
 
@@ -44,3 +45,7 @@ See [Preview.md](Preview.md) for details.
 - 2026-09-12: Initial Preview basis (empty state, text viewer with line
   numbers, Markdown preview/edit, manual save, CLI plus dialog open,
   `lang/en_us.json` and `lang/de_de.json`).
+- 2026-09-12: PDF support (read-only page viewer with previous/next
+  navigation, page indicator, zoom in/out plus fit width, lazy per-page
+  text extraction, encrypted/corrupt/missing hints, `pdf.*` and
+  `status.pdf` keys in `lang/en_us.json` and `lang/de_de.json`).

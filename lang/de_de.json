@@ -20,5 +20,14 @@
   "status.unsupported": "Format noch nicht unterstützt",
   "status.dirty": "%lines% Zeilen, ungespeicherte Änderungen",
   "status.saved": "%lines% Zeilen",
-  "status.save_failed": "Speichern fehlgeschlagen: %reason%"
+  "status.save_failed": "Speichern fehlgeschlagen: %reason%",
+  "pdf.prev": "Zurück",
+  "pdf.next": "Weiter",
+  "pdf.page": "Seite %page% von %total%",
+  "pdf.zoom_in": "Vergrößern",
+  "pdf.zoom_out": "Verkleinern",
+  "pdf.fit": "Breite anpassen",
+  "pdf.load_failed": "Dieses PDF kann nicht geöffnet werden: %reason%",
+  "pdf.empty_page": "Diese Seite enthält keinen extrahierbaren Text.",
+  "status.pdf": "%count% Seiten, schreibgeschützt"
 }

@@ -3,8 +3,10 @@
 //! Header with `Preview` title plus file name, `Open` / `Edit`-`Done` /
 //! `Save` actions. Empty state with a centered open button. Text files
 //! render read-only with a rendered Markdown preview mode; edit mode
-//! shows raw text with line numbers on the left. Saving is manual only
-//! (`Save` button, `Ctrl+S`, close dialog with Cancel / Save / Don't Save).
+//! shows raw text with line numbers on the left. PDFs open read-only in
+//! a page viewer (previous/next, page indicator, zoom, fit width).
+//! Saving is manual only (`Save` button, `Ctrl+S`, close dialog with
+//! Cancel / Save / Don't Save).
 
 use crate::lang;
 use crate::markdown;
@@ -30,6 +32,10 @@ struct State {
   dirty: bool,
   mode: Mode,
   error: Option<String>,
+  pdf: Option<Rc<model::PdfDoc>>,
+  pdf_page: usize,
+  pdf_zoom: f64,
+  pdf_fit: bool,
 }
 
 impl State {
@@ -41,6 +47,10 @@ impl State {
       dirty: false,
       mode: Mode::Preview,
       error: None,
+      pdf: None,
+      pdf_page: 0,
+      pdf_zoom: 1.0,
+      pdf_fit: true,
     }
   }
 }
@@ -63,6 +73,18 @@ struct Widgets {
   preview_buffer: gtk::TextBuffer,
   unsup_title: gtk::Label,
   unsup_hint: gtk::Label,
+  pdf_bar: gtk::Box,
+  prev_btn: gtk::Button,
+  next_btn: gtk::Button,
+  page_label: gtk::Label,
+  zoom_out_btn: gtk::Button,
+  zoom_in_btn: gtk::Button,
+  fit_btn: gtk::ToggleButton,
+  pdf_scroll: gtk::ScrolledWindow,
+  pdf_view: gtk::TextView,
+  pdf_buffer: gtk::TextBuffer,
+  pdf_error: gtk::Label,
+  pdf_css: gtk::CssProvider,
   root: gtk::Box,
 }
 
@@ -227,6 +249,60 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   unsup_box.append(&unsup_open);
   stack.add_named(&unsup_box, Some("unsupported"));
 
+  // PDF page: toolbar (previous/next, page label, zoom, fit) plus a
+  // read-only page view. Broken PDFs show an error label instead.
+  let pdf_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  pdf_box.set_hexpand(true);
+  pdf_box.set_vexpand(true);
+  let pdf_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  pdf_bar.set_margin_start(16);
+  pdf_bar.set_margin_end(16);
+  pdf_bar.set_margin_top(8);
+  pdf_bar.set_margin_bottom(8);
+  let prev_btn = gtk::Button::with_label(&lang::t("pdf.prev"));
+  let page_label = gtk::Label::new(Some(""));
+  page_label.set_hexpand(true);
+  page_label.add_css_class("dim-label");
+  let next_btn = gtk::Button::with_label(&lang::t("pdf.next"));
+  let zoom_out_btn = gtk::Button::with_label(&lang::t("pdf.zoom_out"));
+  let zoom_in_btn = gtk::Button::with_label(&lang::t("pdf.zoom_in"));
+  let fit_btn = gtk::ToggleButton::with_label(&lang::t("pdf.fit"));
+  fit_btn.set_active(true);
+  pdf_bar.append(&prev_btn);
+  pdf_bar.append(&page_label);
+  pdf_bar.append(&next_btn);
+  pdf_bar.append(&zoom_out_btn);
+  pdf_bar.append(&zoom_in_btn);
+  pdf_bar.append(&fit_btn);
+  pdf_box.append(&pdf_bar);
+  let pdf_buffer = gtk::TextBuffer::new(None);
+  let pdf_view = gtk::TextView::with_buffer(&pdf_buffer);
+  pdf_view.set_editable(false);
+  pdf_view.set_cursor_visible(false);
+  pdf_view.set_wrap_mode(gtk::WrapMode::WordChar);
+  pdf_view.set_hexpand(true);
+  pdf_view.set_vexpand(true);
+  pdf_view.set_left_margin(16);
+  pdf_view.set_right_margin(16);
+  pdf_view.set_top_margin(12);
+  pdf_view.set_bottom_margin(12);
+  pdf_view.add_css_class("pdf-page");
+  let pdf_scroll = gtk::ScrolledWindow::new();
+  pdf_scroll.set_hexpand(true);
+  pdf_scroll.set_vexpand(true);
+  pdf_scroll.set_child(Some(&pdf_view));
+  pdf_box.append(&pdf_scroll);
+  let pdf_error = gtk::Label::new(Some(""));
+  pdf_error.add_css_class("dim-label");
+  pdf_error.set_wrap(true);
+  pdf_error.set_justify(gtk::Justification::Center);
+  pdf_error.set_halign(gtk::Align::Center);
+  pdf_error.set_valign(gtk::Align::Center);
+  pdf_error.set_hexpand(true);
+  pdf_error.set_vexpand(true);
+  pdf_box.append(&pdf_error);
+  stack.add_named(&pdf_box, Some("pdf"));
+
   root.append(&stack);
 
   // Status line.
@@ -240,6 +316,16 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   root.append(&status);
 
   apply_css(&root);
+  // Dedicated display provider for the PDF zoom level (higher priority
+  // than the base style so the scaled font size wins).
+  let pdf_css = gtk::CssProvider::new();
+  if let Some(display) = gtk::gdk::Display::default() {
+    gtk::style_context_add_provider_for_display(
+      &display,
+      &pdf_css,
+      gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+    );
+  }
 
   let widgets = Rc::new(Widgets {
     title,
@@ -258,6 +344,18 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     preview_buffer: preview_buffer.clone(),
     unsup_title,
     unsup_hint,
+    pdf_bar: pdf_bar.clone(),
+    prev_btn: prev_btn.clone(),
+    next_btn: next_btn.clone(),
+    page_label: page_label.clone(),
+    zoom_out_btn: zoom_out_btn.clone(),
+    zoom_in_btn: zoom_in_btn.clone(),
+    fit_btn: fit_btn.clone(),
+    pdf_scroll: pdf_scroll.clone(),
+    pdf_view: pdf_view.clone(),
+    pdf_buffer: pdf_buffer.clone(),
+    pdf_error: pdf_error.clone(),
+    pdf_css: pdf_css.clone(),
     root: root.clone(),
   });
 
@@ -389,6 +487,57 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     save_btn.connect_clicked(move |_| do_save(&state, &widgets));
   }
 
+  // PDF navigation: previous / next page (lazy, current page only).
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    prev_btn.connect_clicked(move |_| {
+      let page = state.borrow().pdf_page.saturating_sub(1);
+      state.borrow_mut().pdf_page = page;
+      refresh_pdf(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    next_btn.connect_clicked(move |_| {
+      let total = state.borrow().pdf.as_ref().map(|d| d.page_count()).unwrap_or(0);
+      let page = model::clamp_page(state.borrow().pdf_page + 1, total);
+      state.borrow_mut().pdf_page = page;
+      refresh_pdf(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+
+  // PDF zoom: font scale steps plus fit-width toggle.
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    zoom_in_btn.connect_clicked(move |_| {
+      let zoom = (state.borrow().pdf_zoom + 0.25).min(3.0);
+      state.borrow_mut().pdf_zoom = zoom;
+      apply_pdf_zoom(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    zoom_out_btn.connect_clicked(move |_| {
+      let zoom = (state.borrow().pdf_zoom - 0.25).max(0.5);
+      state.borrow_mut().pdf_zoom = zoom;
+      apply_pdf_zoom(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    fit_btn.connect_toggled(move |_| {
+      state.borrow_mut().pdf_fit = widgets.fit_btn.is_active();
+      apply_pdf_zoom(&state, &widgets);
+    });
+  }
+
   // Initial file from CLI (`preview /path/to/file`).
   if let Some(path) = initial {
     open_path(&state, &widgets, &path);
@@ -399,16 +548,19 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   root
 }
 
-fn apply_css(root: &gtk::Box) {
-  let css = format!(
+fn base_css() -> String {
+  format!(
     "textview {{ font-family: '{SF_PRO}', 'SF Pro Text', sans-serif; font-size: 13pt; }}\
      textview.mono {{ font-family: 'SF Mono', Monospace; }}\
      .dim-label {{ opacity: 0.6; }}\
      .title-1 {{ font-family: '{SF_PRO}'; font-size: 22pt; font-weight: 800; }}\
      .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
-  );
+  )
+}
+
+fn apply_css(_root: &gtk::Box) {
   let provider = gtk::CssProvider::new();
-  provider.load_from_string(&css);
+  provider.load_from_string(&base_css());
   if let Some(display) = gtk::gdk::Display::default() {
     gtk::style_context_add_provider_for_display(
       &display,
@@ -416,7 +568,6 @@ fn apply_css(root: &gtk::Box) {
       gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
   }
-  let _ = root;
 }
 
 /// Open the native file chooser and load the picked file.
@@ -483,11 +634,46 @@ fn confirm_discard(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, proceed: R
 /// Load a path into the state and refresh the UI.
 fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) {
   let kind = model::classify(path);
+  if kind == FileKind::Pdf {
+    match model::PdfDoc::open(path) {
+      Ok(doc) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = Some(Rc::new(doc));
+        st.pdf_page = 0;
+        st.pdf_zoom = 1.0;
+        st.pdf_fit = true;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = Some(reason);
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
   if kind == FileKind::Unsupported {
     let mut st = state.borrow_mut();
     st.path = Some(path.clone());
     st.kind = kind;
     st.content.clear();
+    st.pdf = None;
     st.dirty = false;
     st.mode = Mode::Preview;
     st.error = None;
@@ -502,6 +688,7 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.path = Some(path.clone());
       st.kind = kind;
       st.content = text;
+      st.pdf = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = None;
@@ -514,6 +701,7 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.path = Some(path.clone());
       st.kind = FileKind::Unsupported;
       st.content.clear();
+      st.pdf = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = Some(reason);
@@ -524,8 +712,11 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   }
 }
 
-/// Persist the edit buffer back to disk (manual save only).
+/// Persist the edit buffer back to disk (manual save only, never for PDFs).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if state.borrow().kind == FileKind::Pdf {
+    return;
+  }
   let path = match state.borrow().path.clone() {
     Some(p) => p,
     None => return,
@@ -557,7 +748,8 @@ fn sync_preview_from_edit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, _sa
 fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let st = state.borrow();
   let has_file = st.path.is_some();
-  let editable = has_file && st.kind != FileKind::Unsupported;
+  let editable = has_file && (st.kind == FileKind::Text || st.kind == FileKind::Markdown);
+  let is_pdf = has_file && st.kind == FileKind::Pdf;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -582,6 +774,14 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     widgets.status.set_text(&lang::t("status.empty"));
   } else if st.kind == FileKind::Unsupported {
     widgets.status.set_text(&lang::t("status.unsupported"));
+  } else if is_pdf {
+    match st.pdf.as_ref() {
+      Some(doc) => widgets.status.set_text(&lang::t_with(
+        "status.pdf",
+        &[("count", &doc.page_count().to_string())],
+      )),
+      None => widgets.status.set_text(&lang::t("status.unsupported")),
+    }
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -593,6 +793,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
 
   let page = if !has_file {
     "empty"
+  } else if st.kind == FileKind::Pdf {
+    "pdf"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -607,6 +809,11 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
 fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let st = state.borrow();
   if st.path.is_none() {
+    return;
+  }
+  if st.kind == FileKind::Pdf {
+    drop(st);
+    refresh_pdf(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -649,6 +856,71 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   // (chrome reads saved content; keep it simple and re-run.)
   // Note: borrow ended above.
   // refresh_chrome(state, widgets); // skip: changed handler already does it
+}
+
+/// Render the current PDF page (lazy: only the current page is extracted).
+/// Broken PDFs (missing, corrupt, encrypted) show an error label instead.
+fn refresh_pdf(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let (total, page, reason, fit) = {
+    let st = state.borrow();
+    let total = st.pdf.as_ref().map(|d| d.page_count()).unwrap_or(0);
+    let page = model::clamp_page(st.pdf_page, total);
+    (total, page, st.error.clone(), st.pdf_fit)
+  };
+  state.borrow_mut().pdf_page = page;
+  widgets.fit_btn.set_active(fit);
+
+  let has_doc = state.borrow().pdf.is_some();
+  if !has_doc {
+    let reason = reason.unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.pdf_bar.set_visible(false);
+    widgets.pdf_scroll.set_visible(false);
+    widgets.pdf_error.set_visible(true);
+    widgets.pdf_error.set_text(&lang::t_with(
+      "pdf.load_failed",
+      &[("reason", &reason)],
+    ));
+    return;
+  }
+  widgets.pdf_bar.set_visible(true);
+  widgets.pdf_scroll.set_visible(true);
+  widgets.pdf_error.set_visible(false);
+
+  let text = state
+    .borrow()
+    .pdf
+    .as_ref()
+    .and_then(|doc| doc.page_text(page).ok())
+    .unwrap_or_default();
+  if text.trim().is_empty() {
+    widgets.pdf_buffer.set_text(&lang::t("pdf.empty_page"));
+  } else {
+    widgets.pdf_buffer.set_text(text.trim());
+  }
+  widgets.page_label.set_text(&lang::t_with(
+    "pdf.page",
+    &[("page", &(page + 1).to_string()), ("total", &total.to_string())],
+  ));
+  widgets.prev_btn.set_sensitive(page > 0);
+  widgets.next_btn.set_sensitive(page + 1 < total);
+  apply_pdf_zoom(state, widgets);
+}
+
+/// Apply the PDF zoom level (SF Pro Display font scale) and fit-width mode.
+fn apply_pdf_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let (zoom, fit) = {
+    let st = state.borrow();
+    (st.pdf_zoom, st.pdf_fit)
+  };
+  let size = (13.0 * zoom).clamp(6.0, 48.0);
+  widgets.pdf_css.load_from_string(&format!(
+    "textview.pdf-page {{ font-family: '{SF_PRO}', 'SF Pro Text', sans-serif; font-size: {size:.1}pt; }}"
+  ));
+  widgets.pdf_view.set_wrap_mode(if fit {
+    gtk::WrapMode::WordChar
+  } else {
+    gtk::WrapMode::None
+  });
 }
 
 fn update_gutter(widgets: &Widgets) {

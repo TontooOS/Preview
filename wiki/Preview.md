@@ -4,6 +4,7 @@ TontooOS document viewer basis: a 960x640 window with a header (`Preview`
 title plus file name, `Open` / `Edit`-`Done` / `Save` actions), an empty
 state with a centered open button, a text viewer with line numbers on the
 left, and a Markdown mode with a rendered preview plus a raw edit mode.
+PDFs open read-only in a page viewer (see [Pdf.md](Pdf.md)).
 Saving is manual only. Unsupported files show a hint page instead of
 binary garbage.
 
@@ -12,7 +13,7 @@ binary garbage.
 From top to bottom the window contains:
 
 1. Header row: title plus subtitle on the left, actions on the right
-2. Content stack: empty, text (edit/preview), or unsupported page
+2. Content stack: empty, text (edit/preview), pdf, or unsupported page
 3. Status line: line count and save state
 
 ```rust
@@ -29,12 +30,19 @@ app.run();
 |---|---|---|
 | `Markdown` | `md`, `markdown` | Rendered preview plus raw edit mode |
 | `Text` | `txt`, `json`, `py`, `rs`, `toml`, `log`, ... | Plain preview plus edit mode |
-| `Unsupported` | `pdf`, `png`, `mp3`, `xlsx`, ... | Hint page, no binary load |
+| `Pdf` | `pdf` | Read-only page viewer (see [Pdf.md](Pdf.md)) |
+| `Unsupported` | `png`, `mp3`, `xlsx`, ... | Hint page, no binary load |
 
 ```rust
 pub fn classify(path: &Path) -> FileKind;
 pub fn load_text(path: &Path) -> Result<String, String>;
 pub fn save_text(path: &Path, content: &str) -> Result<(), String>;
+impl PdfDoc {
+  pub fn open(path: &Path) -> Result<Self, String>;
+  pub fn page_count(&self) -> usize;
+  pub fn page_text(&self, index: usize) -> Result<String, String>;
+}
+pub fn clamp_page(index: usize, total: usize) -> usize;
 ```
 
 Rules:
@@ -118,3 +126,4 @@ system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 
 - [MAIN.md](MAIN.md) – wiki entry point and changelog
 - [RULE.md](RULE.md) – wiki design system
+- [Pdf.md](Pdf.md) – read-only PDF page viewer
