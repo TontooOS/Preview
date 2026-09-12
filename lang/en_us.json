@@ -29,5 +29,12 @@
   "pdf.fit": "Fit Width",
   "pdf.load_failed": "Cannot open this PDF: %reason%",
   "pdf.empty_page": "This page contains no extractable text.",
-  "status.pdf": "%count% pages, read-only"
+  "status.pdf": "%count% pages, read-only",
+  "image.zoom_in": "Zoom In",
+  "image.zoom_out": "Zoom Out",
+  "image.fit": "Fit Window",
+  "image.load_failed": "Cannot open this image: %reason%",
+  "image.downscaled": "downscaled for display",
+  "status.image": "%width% x %height%, %size%, read-only",
+  "status.image_unknown": "%size%, read-only"
 }

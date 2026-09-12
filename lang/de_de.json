@@ -29,5 +29,12 @@
   "pdf.fit": "Breite anpassen",
   "pdf.load_failed": "Dieses PDF kann nicht geöffnet werden: %reason%",
   "pdf.empty_page": "Diese Seite enthält keinen extrahierbaren Text.",
-  "status.pdf": "%count% Seiten, schreibgeschützt"
+  "status.pdf": "%count% Seiten, schreibgeschützt",
+  "image.zoom_in": "Vergrößern",
+  "image.zoom_out": "Verkleinern",
+  "image.fit": "An Fenster anpassen",
+  "image.load_failed": "Dieses Bild kann nicht geöffnet werden: %reason%",
+  "image.downscaled": "für die Anzeige verkleinert",
+  "status.image": "%width% x %height%, %size%, schreibgeschützt",
+  "status.image_unknown": "%size%, schreibgeschützt"
 }

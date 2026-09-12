@@ -3,7 +3,8 @@
 //! Empty state with a centered open button; text files (`.txt`, `.py`,
 //! `.json`, ...) open as editable text with line numbers; Markdown gets
 //! a rendered preview plus raw edit mode; PDFs open read-only with page
-//! navigation, page indicator, zoom and fit width. Saving is manual only
+//! navigation, page indicator, zoom and fit width; images open read-only
+//! as pictures with zoom and fit window. Saving is manual only
 //! (`Save`, `Ctrl+S`, close dialog). Opens via CLI (`preview /path/to/file`)
 //! or the native file dialog. Follows the live system color scheme
 //! (Dark `#1d1d1d`, Light `#ececec`).

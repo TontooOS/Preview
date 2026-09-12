@@ -181,3 +181,4 @@ let first = doc.page_text(0)?;
 - [MAIN.md](MAIN.md) – wiki entry point and changelog
 - [RULE.md](RULE.md) – wiki design system
 - [Preview.md](Preview.md) – text viewer, Markdown preview/edit and manual save
+- [Image.md](Image.md) – read-only picture viewer

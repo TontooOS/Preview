@@ -4,9 +4,10 @@
 //! `Save` actions. Empty state with a centered open button. Text files
 //! render read-only with a rendered Markdown preview mode; edit mode
 //! shows raw text with line numbers on the left. PDFs open read-only in
-//! a page viewer (previous/next, page indicator, zoom, fit width).
-//! Saving is manual only (`Save` button, `Ctrl+S`, close dialog with
-//! Cancel / Save / Don't Save).
+//! a page viewer (previous/next, page indicator, zoom, fit width). Images
+//! open read-only as actual pictures (`gtk::Picture` with zoom in/out
+//! plus fit window). Saving is manual only (`Save` button, `Ctrl+S`,
+//! close dialog with Cancel / Save / Don't Save).
 
 use crate::lang;
 use crate::markdown;
@@ -36,6 +37,11 @@ struct State {
   pdf_page: usize,
   pdf_zoom: f64,
   pdf_fit: bool,
+  img_meta: Option<model::ImageMeta>,
+  img_error: Option<String>,
+  img_base: Option<gdk_pixbuf::Pixbuf>,
+  img_zoom: f64,
+  img_fit: bool,
 }
 
 impl State {
@@ -51,6 +57,11 @@ impl State {
       pdf_page: 0,
       pdf_zoom: 1.0,
       pdf_fit: true,
+      img_meta: None,
+      img_error: None,
+      img_base: None,
+      img_zoom: 1.0,
+      img_fit: true,
     }
   }
 }
@@ -85,6 +96,13 @@ struct Widgets {
   pdf_buffer: gtk::TextBuffer,
   pdf_error: gtk::Label,
   pdf_css: gtk::CssProvider,
+  img_bar: gtk::Box,
+  img_zoom_out_btn: gtk::Button,
+  img_zoom_in_btn: gtk::Button,
+  img_fit_btn: gtk::ToggleButton,
+  img_scroll: gtk::ScrolledWindow,
+  img_picture: gtk::Picture,
+  img_error: gtk::Label,
   root: gtk::Box,
 }
 
@@ -303,6 +321,48 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pdf_box.append(&pdf_error);
   stack.add_named(&pdf_box, Some("pdf"));
 
+  // Image page: toolbar (zoom out/in, fit window) plus an actual picture
+  // (`gtk::Picture`). Broken images show an error label with the reason.
+  let img_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  img_box.set_hexpand(true);
+  img_box.set_vexpand(true);
+  let img_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  img_bar.set_margin_start(16);
+  img_bar.set_margin_end(16);
+  img_bar.set_margin_top(8);
+  img_bar.set_margin_bottom(8);
+  img_bar.set_halign(gtk::Align::Center);
+  let img_zoom_out_btn = gtk::Button::with_label(&lang::t("image.zoom_out"));
+  let img_zoom_in_btn = gtk::Button::with_label(&lang::t("image.zoom_in"));
+  let img_fit_btn = gtk::ToggleButton::with_label(&lang::t("image.fit"));
+  img_fit_btn.set_active(true);
+  img_bar.append(&img_zoom_out_btn);
+  img_bar.append(&img_zoom_in_btn);
+  img_bar.append(&img_fit_btn);
+  img_box.append(&img_bar);
+  let img_picture = gtk::Picture::new();
+  img_picture.set_content_fit(gtk::ContentFit::Contain);
+  img_picture.set_can_shrink(true);
+  img_picture.set_halign(gtk::Align::Center);
+  img_picture.set_valign(gtk::Align::Center);
+  img_picture.set_hexpand(true);
+  img_picture.set_vexpand(true);
+  let img_scroll = gtk::ScrolledWindow::new();
+  img_scroll.set_hexpand(true);
+  img_scroll.set_vexpand(true);
+  img_scroll.set_child(Some(&img_picture));
+  img_box.append(&img_scroll);
+  let img_error = gtk::Label::new(Some(""));
+  img_error.add_css_class("dim-label");
+  img_error.set_wrap(true);
+  img_error.set_justify(gtk::Justification::Center);
+  img_error.set_halign(gtk::Align::Center);
+  img_error.set_valign(gtk::Align::Center);
+  img_error.set_hexpand(true);
+  img_error.set_vexpand(true);
+  img_box.append(&img_error);
+  stack.add_named(&img_box, Some("image"));
+
   root.append(&stack);
 
   // Status line.
@@ -356,6 +416,13 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     pdf_buffer: pdf_buffer.clone(),
     pdf_error: pdf_error.clone(),
     pdf_css: pdf_css.clone(),
+    img_bar: img_bar.clone(),
+    img_zoom_out_btn: img_zoom_out_btn.clone(),
+    img_zoom_in_btn: img_zoom_in_btn.clone(),
+    img_fit_btn: img_fit_btn.clone(),
+    img_scroll: img_scroll.clone(),
+    img_picture: img_picture.clone(),
+    img_error: img_error.clone(),
     root: root.clone(),
   });
 
@@ -538,6 +605,44 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
+  // Image zoom: factor steps plus fit-window toggle. Manual zoom leaves
+  // fit mode; enabling fit scales the picture into the current viewport.
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    img_zoom_in_btn.connect_clicked(move |_| {
+      let zoom = model::image_zoom_in(state.borrow().img_zoom);
+      state.borrow_mut().img_zoom = zoom;
+      state.borrow_mut().img_fit = false;
+      widgets.img_fit_btn.set_active(false);
+      apply_image_zoom(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    img_zoom_out_btn.connect_clicked(move |_| {
+      let zoom = model::image_zoom_out(state.borrow().img_zoom);
+      state.borrow_mut().img_zoom = zoom;
+      state.borrow_mut().img_fit = false;
+      widgets.img_fit_btn.set_active(false);
+      apply_image_zoom(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    img_fit_btn.connect_toggled(move |_| {
+      let active = widgets.img_fit_btn.is_active();
+      state.borrow_mut().img_fit = active;
+      if active {
+        apply_image_fit(&state, &widgets);
+      } else {
+        apply_image_zoom(&state, &widgets);
+      }
+    });
+  }
+
   // Initial file from CLI (`preview /path/to/file`).
   if let Some(path) = initial {
     open_path(&state, &widgets, &path);
@@ -633,7 +738,9 @@ fn confirm_discard(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, proceed: R
 
 /// Load a path into the state and refresh the UI.
 fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) {
-  let kind = model::classify(path);
+  // Extension first, image magic bytes second so misnamed files still land
+  // on the picture viewer instead of the unsupported page.
+  let kind = model::classify_file(path);
   if kind == FileKind::Pdf {
     match model::PdfDoc::open(path) {
       Ok(doc) => {
@@ -645,6 +752,9 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.pdf_page = 0;
         st.pdf_zoom = 1.0;
         st.pdf_fit = true;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -658,9 +768,52 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.kind = kind;
         st.content.clear();
         st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = Some(reason);
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
+  if kind == FileKind::Image {
+    match model::probe_image(path) {
+      Ok(meta) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = Some(meta);
+        st.img_error = None;
+        st.img_base = None;
+        st.img_zoom = 1.0;
+        st.img_fit = true;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+        apply_image_fit(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = Some(reason);
+        st.img_base = None;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
         drop(st);
         refresh_chrome(state, widgets);
         refresh_body(state, widgets);
@@ -674,6 +827,9 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     st.kind = kind;
     st.content.clear();
     st.pdf = None;
+    st.img_meta = None;
+    st.img_error = None;
+    st.img_base = None;
     st.dirty = false;
     st.mode = Mode::Preview;
     st.error = None;
@@ -689,6 +845,9 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.kind = kind;
       st.content = text;
       st.pdf = None;
+      st.img_meta = None;
+      st.img_error = None;
+      st.img_base = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = None;
@@ -702,6 +861,9 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.kind = FileKind::Unsupported;
       st.content.clear();
       st.pdf = None;
+      st.img_meta = None;
+      st.img_error = None;
+      st.img_base = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = Some(reason);
@@ -712,9 +874,10 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   }
 }
 
-/// Persist the edit buffer back to disk (manual save only, never for PDFs).
+/// Persist the edit buffer back to disk (manual save only, never for PDFs
+/// or images).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
-  if state.borrow().kind == FileKind::Pdf {
+  if state.borrow().kind == FileKind::Pdf || state.borrow().kind == FileKind::Image {
     return;
   }
   let path = match state.borrow().path.clone() {
@@ -750,6 +913,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let has_file = st.path.is_some();
   let editable = has_file && (st.kind == FileKind::Text || st.kind == FileKind::Markdown);
   let is_pdf = has_file && st.kind == FileKind::Pdf;
+  let is_image = has_file && st.kind == FileKind::Image;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -782,6 +946,34 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
       )),
       None => widgets.status.set_text(&lang::t("status.unsupported")),
     }
+  } else if is_image {
+    match st.img_meta.as_ref() {
+      Some(meta) if meta.has_dimensions() => {
+        let mut text = lang::t_with(
+          "status.image",
+          &[
+            ("width", &meta.width.to_string()),
+            ("height", &meta.height.to_string()),
+            ("size", &model::format_file_size(meta.file_bytes)),
+          ],
+        );
+        if meta.downscaled {
+          text.push_str(&format!(" ({})", lang::t("image.downscaled")));
+        }
+        widgets.status.set_text(&text);
+      }
+      Some(meta) => widgets.status.set_text(&lang::t_with(
+        "status.image_unknown",
+        &[("size", &model::format_file_size(meta.file_bytes))],
+      )),
+      None => {
+        let reason = st.img_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+        widgets.status.set_text(&lang::t_with(
+          "image.load_failed",
+          &[("reason", &reason)],
+        ));
+      }
+    }
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -795,6 +987,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "empty"
   } else if st.kind == FileKind::Pdf {
     "pdf"
+  } else if st.kind == FileKind::Image {
+    "image"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -814,6 +1008,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Pdf {
     drop(st);
     refresh_pdf(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Image {
+    drop(st);
+    refresh_image(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -921,6 +1120,164 @@ fn apply_pdf_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   } else {
     gtk::WrapMode::None
   });
+}
+
+/// Render the current image page. Raster formats are decoded once with the
+/// `image` crate (first frame for animated GIFs) and shown as an actual
+/// picture; SVGs are handed to GTK (librsvg) via file. Broken images stay
+/// on the image page and show `image.load_failed` with the reason; they
+/// never fall through to the unsupported page.
+fn refresh_image(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let has_meta = state.borrow().img_meta.is_some();
+  if !has_meta {
+    let reason = state
+      .borrow()
+      .img_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.img_bar.set_visible(false);
+    widgets.img_scroll.set_visible(false);
+    widgets.img_error.set_visible(true);
+    widgets.img_error.set_text(&lang::t_with(
+      "image.load_failed",
+      &[("reason", &reason)],
+    ));
+    return;
+  }
+  widgets.img_bar.set_visible(true);
+  widgets.img_scroll.set_visible(true);
+  widgets.img_error.set_visible(false);
+  widgets.img_fit_btn.set_active(state.borrow().img_fit);
+
+  let is_svg = state.borrow().img_meta.as_ref().is_some_and(|m| m.is_svg);
+  if is_svg {
+    let path = state.borrow().path.clone();
+    widgets.img_picture.set_paintable(None::<&gtk::gdk::Texture>);
+    if let Some(path) = path.as_ref() {
+      widgets
+        .img_picture
+        .set_file(Some(&gtk::gio::File::for_path(path)));
+    }
+    apply_image_zoom(state, widgets);
+    return;
+  }
+
+  // Raster: decode once, then reuse the cached base pixbuf.
+  if state.borrow().img_base.is_none() {
+    let (path, meta) = {
+      let st = state.borrow();
+      let meta = st.img_meta.as_ref().map(|m| (m.display_width, m.display_height));
+      (st.path.clone(), meta)
+    };
+    let (Some(path), Some((display_width, display_height))) = (path, meta) else {
+      return;
+    };
+    match decode_display_pixbuf(&path, display_width, display_height) {
+      Ok(pixbuf) => {
+        state.borrow_mut().img_base = Some(pixbuf);
+      }
+      Err(reason) => {
+        state.borrow_mut().img_error = Some(reason.clone());
+        state.borrow_mut().img_meta = None;
+        widgets.img_bar.set_visible(false);
+        widgets.img_scroll.set_visible(false);
+        widgets.img_error.set_visible(true);
+        widgets.img_error.set_text(&lang::t_with(
+          "image.load_failed",
+          &[("reason", &reason)],
+        ));
+        refresh_chrome(state, widgets);
+        return;
+      }
+    }
+  }
+  if let Some(base) = state.borrow().img_base.clone() {
+    widgets.img_picture.set_file(None::<&gtk::gio::File>);
+    widgets
+      .img_picture
+      .set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&base)));
+  }
+  apply_image_zoom(state, widgets);
+}
+
+/// Decode a raster image file into a display pixbuf, downscaled to the
+/// probed display size so huge images stay cheap to render. Animated GIFs
+/// decode to their first frame.
+fn decode_display_pixbuf(
+  path: &std::path::Path,
+  display_width: u32,
+  display_height: u32,
+) -> Result<gdk_pixbuf::Pixbuf, String> {
+  let dynamic = image::open(path).map_err(|e| format!("cannot decode image: {e}"))?;
+  let rgba = dynamic.to_rgba8();
+  let pixels = if rgba.width() != display_width || rgba.height() != display_height {
+    image::imageops::thumbnail(&rgba, display_width, display_height)
+  } else {
+    rgba
+  };
+  let (width, height) = (pixels.width(), pixels.height());
+  if width == 0 || height == 0 {
+    return Err("image has no pixels".to_string());
+  }
+  let bytes = glib::Bytes::from(pixels.as_raw());
+  Ok(gdk_pixbuf::Pixbuf::from_bytes(
+    &bytes,
+    gdk_pixbuf::Colorspace::Rgb,
+    true,
+    8,
+    width as i32,
+    height as i32,
+    (width * 4) as i32,
+  ))
+}
+
+/// Base pixels used for zoom math: probed display size for raster images,
+/// parsed canvas size for SVGs. Returns `None` when unknown (SVG without
+/// a size), in which case the picture keeps its natural size.
+fn image_base_size(state: &Rc<RefCell<State>>) -> Option<(u32, u32)> {
+  let st = state.borrow();
+  let meta = st.img_meta.as_ref()?;
+  if meta.is_svg {
+    if meta.has_dimensions() {
+      Some((meta.width, meta.height))
+    } else {
+      None
+    }
+  } else {
+    Some((meta.display_width, meta.display_height))
+  }
+}
+
+/// Apply the image zoom factor via an explicit picture size so the aspect
+/// ratio is preserved and the scrolled window scrolls past the viewport.
+fn apply_image_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let zoom = state.borrow().img_zoom;
+  match image_base_size(state) {
+    Some((base_width, base_height)) => {
+      let (width, height) = model::zoomed_size(base_width, base_height, zoom);
+      widgets.img_picture.set_size_request(width as i32, height as i32);
+    }
+    None => widgets.img_picture.set_size_request(-1, -1),
+  }
+  widgets.img_picture.set_content_fit(gtk::ContentFit::Contain);
+}
+
+/// Fit the picture into the current viewport (cheap: computed once from
+/// the current allocation; press Fit again after resizes). Falls back to
+/// the current zoom when the viewport is not allocated yet.
+fn apply_image_fit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let base = image_base_size(state);
+  let (view_width, view_height) = (
+    widgets.img_scroll.width(),
+    widgets.img_scroll.height(),
+  );
+  if let Some((base_width, base_height)) = base {
+    if view_width > 0 && view_height > 0 {
+      state.borrow_mut().img_zoom =
+        model::fit_zoom_for(base_width, base_height, view_width, view_height);
+    }
+  }
+  apply_image_zoom(state, widgets);
 }
 
 fn update_gutter(widgets: &Widgets) {

@@ -20,6 +20,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Rules | [RULE.md](RULE.md) | Development and usage rules |
 | Preview | [Preview.md](Preview.md) | Text viewer, Markdown preview/edit, manual save and localization |
 | Pdf | [Pdf.md](Pdf.md) | Read-only PDF page viewer with navigation, zoom and fit width |
+| Image | [Image.md](Image.md) | Read-only picture viewer with zoom and fit window |
 
 ## Quick Start
 
@@ -49,3 +50,8 @@ See [Preview.md](Preview.md) for details.
   navigation, page indicator, zoom in/out plus fit width, lazy per-page
   text extraction, encrypted/corrupt/missing hints, `pdf.*` and
   `status.pdf` keys in `lang/en_us.json` and `lang/de_de.json`).
+- 2026-09-12: Image support (read-only picture viewer with `gtk::Picture`,
+  zoom in/out plus fit window, raster decoding via the `image` crate with
+  magic-byte sniffing, SVG via GTK/librsvg, dimensions plus file size in
+  the status line, corrupt/missing hints, `image.*`, `status.image` and
+  `status.image_unknown` keys in `lang/en_us.json` and `lang/de_de.json`).
