@@ -59,5 +59,12 @@
   "pptx.load_failed": "Diese Präsentation kann nicht geöffnet werden: %reason%",
   "pptx.notes": "Notizen",
   "pptx.truncated": "Große Präsentation: die ersten %count% Folien werden gezeigt",
-  "status.pptx": "%format%, %slides% Folien, %words% Wörter, %size%, schreibgeschützt"
+  "status.pptx": "%format%, %slides% Folien, %words% Wörter, %size%, schreibgeschützt",
+  "xlsx.prev": "Zurück",
+  "xlsx.next": "Weiter",
+  "xlsx.sheet": "Blatt %page% von %total%: %name%",
+  "xlsx.load_failed": "Diese Tabelle kann nicht geöffnet werden: %reason%",
+  "xlsx.truncated": "Große Tabelle: nur die ersten %rows% Zeilen und %cols% Spalten werden gezeigt",
+  "xlsx.empty_sheet": "Dieses Blatt enthält keine Daten.",
+  "status.xlsx": "%format%, %sheets% Blätter, %rows%, %size%, schreibgeschützt"
 }

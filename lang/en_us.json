@@ -59,5 +59,12 @@
   "pptx.load_failed": "Cannot open this presentation: %reason%",
   "pptx.notes": "Notes",
   "pptx.truncated": "Large deck: showing the first %count% slides",
-  "status.pptx": "%format%, %slides% slides, %words% words, %size%, read-only"
+  "status.pptx": "%format%, %slides% slides, %words% words, %size%, read-only",
+  "xlsx.prev": "Previous",
+  "xlsx.next": "Next",
+  "xlsx.sheet": "Sheet %page% of %total%: %name%",
+  "xlsx.load_failed": "Cannot open this spreadsheet: %reason%",
+  "xlsx.truncated": "Large sheet: showing the first %rows% rows and %cols% columns",
+  "xlsx.empty_sheet": "This sheet contains no data.",
+  "status.xlsx": "%format%, %sheets% sheets, %rows%, %size%, read-only"
 }

@@ -6,7 +6,8 @@
 //! navigation, page indicator, zoom and fit width; images open read-only
 //! as pictures with zoom and fit window; audio files open read-only in a
 //! compact player with play/pause, seek and volume; presentations open
-//! read-only as a slide viewer with previous/next navigation. Saving is
+//! read-only as a slide viewer with previous/next navigation; spreadsheets
+//! open read-only as a sheet grid with a sheet switcher. Saving is
 //! manual only
 //! (`Save`, `Ctrl+S`, close dialog). Opens via CLI (`preview /path/to/file`)
 //! or the native file dialog. Follows the live system color scheme
@@ -18,6 +19,7 @@ mod markdown;
 mod model;
 mod pptx;
 mod views;
+mod xlsx;
 
 sdk::preinclude!();
 

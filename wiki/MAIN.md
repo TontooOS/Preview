@@ -25,6 +25,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Video | [Video.md](Video.md) | Read-only video player with picture, play/pause, seek, volume and file info |
 | Docx | [Docx.md](Docx.md) | Read-only word document viewer with formatted text, lists and tables |
 | Pptx | [Pptx.md](Pptx.md) | Read-only presentation slide viewer with navigation, formatted text and speaker notes |
+| Xlsx | [Xlsx.md](Xlsx.md) | Read-only spreadsheet sheet viewer with tabs, grid, column letters and row numbers |
 
 ## Quick Start
 
@@ -88,3 +89,12 @@ See [Preview.md](Preview.md) for details.
   legacy `ppt`, magic-byte sniffing, corrupt/password/oversized hints,
   `pptx.*` and `status.pptx` keys in `lang/en_us.json` and
   `lang/de_de.json`; no new dependency, see `wiki/Pptx.md`).
+- 2026-09-12: Xlsx support (read-only spreadsheet sheet viewer with
+  previous/next navigation, sheet indicator, sheet tab switcher, column
+  letters plus row numbers, bold header row and right-aligned numbers;
+  `xlsx` fully plus `csv` (with semicolon auto-detect), `tsv` and `ods`
+  fully plus an honest hint for legacy `xls` (plain `csv`/`tsv` moved
+  from the text viewer to the sheet grid), magic-byte sniffing for
+  packages, corrupt/password/oversized/binary hints, `xlsx.*` and
+  `status.xlsx` keys in `lang/en_us.json` and `lang/de_de.json`; no new
+  dependency, see `wiki/Xlsx.md`).

@@ -14,7 +14,9 @@
 //! `.docx` fully, `.odt` and `.rtf` on a best-effort basis, legacy `.doc`
 //! with an honest hint (see `wiki/Docx.md`). Presentations open read-only
 //! as a slide viewer: `.pptx` fully, `.odp` on a best-effort basis, legacy
-//! `.ppt` with an honest hint (see `wiki/Pptx.md`). Anything else is
+//! `.ppt` with an honest hint (see `wiki/Pptx.md`). Spreadsheets open
+//! read-only as a sheet grid: `.xlsx`, `.csv`, `.tsv` and `.ods` fully,
+//! legacy `.xls` with an honest hint (see `wiki/Xlsx.md`). Anything else is
 //! rejected as unsupported with a hint (binary files are never loaded as
 //! text).
 
@@ -42,14 +44,17 @@ pub enum FileKind {
   /// Presentation: read-only slide viewer (`.pptx` fully, `.odp`
   /// best-effort, legacy `.ppt` with an honest hint).
   Presentation,
-  /// Not supported yet (spreadsheets, binary).
+  /// Spreadsheet: read-only sheet grid (`.xlsx`, `.csv`, `.tsv` and
+  /// `.ods` fully, legacy `.xls` with an honest hint).
+  Spreadsheet,
+  /// Not supported yet (archives, binary).
   Unsupported,
 }
 
 /// Known plain-text extensions (lowercase, without dot).
 pub const TEXT_EXTENSIONS: &[&str] = &[
   "txt", "md", "markdown", "json", "py", "rs", "toml", "yaml", "yml", "xml", "html", "htm",
-  "css", "js", "ts", "sh", "bash", "zsh", "log", "ini", "cfg", "conf", "csv", "tsv", "sql",
+  "css", "js", "ts", "sh", "bash", "zsh", "log", "ini", "cfg", "conf", "sql",
   "c", "h", "cpp", "hpp", "java", "go", "rb", "php", "swift", "kt", "lua", "r", "pl", "tex",
 ];
 
@@ -93,6 +98,13 @@ pub const DOCUMENT_EXTENSIONS: &[&str] = &["docx", "odt", "rtf", "doc"];
 /// (OLE) shows an honest hint since no decoder is available.
 pub const PRESENTATION_EXTENSIONS: &[&str] = &["pptx", "odp", "ppt"];
 
+/// Spreadsheets open read-only as a sheet grid (see `wiki/Xlsx.md`).
+/// `.xlsx`, `.csv`, `.tsv` and `.ods` are parsed fully, legacy `.xls`
+/// (OLE) shows an honest hint since no decoder is available. Plain
+/// `.csv`/`.tsv` files used to open as text; they now open in the sheet
+/// grid instead (see `wiki/Xlsx.md` for the reason).
+pub const SPREADSHEET_EXTENSIONS: &[&str] = &["xlsx", "xls", "csv", "tsv", "ods"];
+
 /// Max file size loaded as text in the basis version (8 MiB).
 pub const MAX_TEXT_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -124,6 +136,9 @@ pub fn classify(path: &Path) -> FileKind {
   if PRESENTATION_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Presentation;
   }
+  if SPREADSHEET_EXTENSIONS.contains(&ext.as_str()) {
+    return FileKind::Spreadsheet;
+  }
   if TEXT_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Text;
   }
@@ -143,7 +158,9 @@ pub fn classify(path: &Path) -> FileKind {
 /// document magic (Word ZIP package, ODT package, RTF markup or legacy OLE),
 /// it is treated as a document; when it carries known presentation magic
 /// (PowerPoint ZIP package or ODP package), it is treated as a
-/// presentation. Other kinds are never changed by sniffing. Audio sniffing wins over video
+/// presentation; when it carries known spreadsheet magic (workbook ZIP
+/// package or spreadsheet ODF package), it is treated as a spreadsheet.
+/// Other kinds are never changed by sniffing. Audio sniffing wins over video
 /// sniffing for shared containers (Ogg, ASF) since their headers cannot name
 /// the stream type cheaply; the `.ogv` and `.wmv` extensions still route to
 /// video first. Document sniffing only matches Word/ODT packages (never
@@ -157,6 +174,7 @@ pub fn classify_file(path: &Path) -> FileKind {
     || by_ext == FileKind::Video
     || by_ext == FileKind::Document
     || by_ext == FileKind::Presentation
+    || by_ext == FileKind::Spreadsheet
   {
     return by_ext;
   }
@@ -177,6 +195,9 @@ pub fn classify_file(path: &Path) -> FileKind {
   }
   if sniff_presentation(&bytes) {
     return FileKind::Presentation;
+  }
+  if sniff_spreadsheet(&bytes) {
+    return FileKind::Spreadsheet;
   }
   by_ext
 }
@@ -512,6 +533,37 @@ fn is_odp_zip(bytes: &[u8]) -> bool {
   find_subslice(bytes, b"application/vnd.oasis.opendocument.presentation").is_some()
 }
 
+/// Returns true when the bytes carry known spreadsheet magic (see
+/// `wiki/Xlsx.md` for the coverage table): a ZIP package (`PK\x03\x04`)
+/// holding `xl/` parts (`.xlsx`) or a spreadsheet ODF package (ZIP plus
+/// the OpenDocument spreadsheet MIME type, `.ods`). Other ZIP files (word
+/// documents, presentations, plain archives) never match. Plain
+/// `.csv`/`.tsv` files are text and have no magic, so they are only
+/// classified by extension; legacy `.xls` (OLE) files share their magic
+/// with `.doc`, so they are only classified by extension as well.
+pub fn sniff_spreadsheet(bytes: &[u8]) -> bool {
+  is_xlsx_zip(bytes) || is_ods_zip(bytes)
+}
+
+/// `.xlsx` package: ZIP magic plus an `xl/` part name in the prefix. The
+/// 4 KiB prefix holds the first local headers, so misnamed packages still
+/// match; other OOXML packages (`word/`, `ppt/`) never match.
+fn is_xlsx_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"xl/").is_some()
+}
+
+/// ODS package: ZIP magic plus the OpenDocument spreadsheet MIME type of
+/// the leading stored `mimetype` entry.
+fn is_ods_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"application/vnd.oasis.opendocument.spreadsheet").is_some()
+}
+
 /// Short display label for a document extension (lowercase, without dot).
 /// Unknown extensions report `Document` so sniffed files still get a label.
 pub fn document_format_label(ext: &str) -> &'static str {
@@ -533,6 +585,20 @@ pub fn presentation_format_label(ext: &str) -> &'static str {
     "odp" => "ODP",
     "ppt" => "PPT",
     _ => "Presentation",
+  }
+}
+
+/// Short display label for a spreadsheet extension (lowercase, without
+/// dot). Unknown extensions report `Spreadsheet` so sniffed files still
+/// get a label.
+pub fn spreadsheet_format_label(ext: &str) -> &'static str {
+  match ext {
+    "xlsx" => "XLSX",
+    "xls" => "XLS",
+    "csv" => "CSV",
+    "tsv" => "TSV",
+    "ods" => "ODS",
+    _ => "Spreadsheet",
   }
 }
 
@@ -1520,8 +1586,96 @@ mod tests {
 
   #[test]
   fn unsupported_classified() {
-    assert_eq!(classify(Path::new("sheet.xlsx")), FileKind::Unsupported);
     assert_eq!(classify(Path::new("archive.zip")), FileKind::Unsupported);
+    assert_eq!(classify(Path::new("blob.bin")), FileKind::Unsupported);
+  }
+
+  #[test]
+  fn spreadsheet_extensions_classified() {
+    for name in [
+      "sheet.xlsx",
+      "sheet.XLSX",
+      "legacy.xls",
+      "legacy.XLS",
+      "data.csv",
+      "data.CSV",
+      "data.tsv",
+      "data.TSV",
+      "table.ods",
+      "table.ODS",
+    ] {
+      assert_eq!(classify(Path::new(name)), FileKind::Spreadsheet, "failed for {name}");
+    }
+  }
+
+  #[test]
+  fn spreadsheet_magic_sniffed() {
+    // Minimal .xlsx local header with an `xl/` part name.
+    let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
+    assert!(sniff_spreadsheet(&xlsx));
+    // Minimal ODS: ZIP magic plus the OpenDocument spreadsheet MIME type.
+    let mut ods = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    ods.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.spreadsheet");
+    assert!(sniff_spreadsheet(&ods));
+    // Never a spreadsheet: other ZIP files, documents and presentations.
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    assert!(!sniff_spreadsheet(&docx));
+    let mut pptx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    pptx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00ppt/presentation.xml");
+    assert!(!sniff_spreadsheet(&pptx));
+    // The bare ODF text/presentation MIME types never sniff as sheets.
+    let mut odt = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    odt.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.text");
+    assert!(!sniff_spreadsheet(&odt));
+    assert!(!sniff_spreadsheet(b"PK\x03\x04plain zip without office parts"));
+    assert!(!sniff_spreadsheet(b"hello world"));
+    assert!(!sniff_spreadsheet(b"%PDF-1.4"));
+    assert!(!sniff_spreadsheet(b""));
+  }
+
+  #[test]
+  fn misnamed_spreadsheet_sniffed_as_spreadsheet() {
+    let dir = std::env::temp_dir().join("preview-sheet-test");
+    let _ = std::fs::create_dir_all(&dir);
+    // XLSX magic without any extension still opens as a spreadsheet.
+    let no_ext = dir.join("misnamed-no-ext-sheet");
+    let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
+    std::fs::write(&no_ext, xlsx).expect("write xlsx magic");
+    assert_eq!(classify_file(&no_ext), FileKind::Spreadsheet);
+    // ODS magic behind a `.bin` extension still opens as a spreadsheet.
+    let bin_ext = dir.join("misnamed-sheet.bin");
+    let mut ods = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    ods.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.spreadsheet");
+    std::fs::write(&bin_ext, ods).expect("write ods magic");
+    assert_eq!(classify_file(&bin_ext), FileKind::Spreadsheet);
+    // A word document package behind a `.bin` extension stays a document.
+    let doc_ext = dir.join("misnamed-word-not-sheet.bin");
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    std::fs::write(&doc_ext, docx).expect("write docx magic");
+    assert_eq!(classify_file(&doc_ext), FileKind::Document);
+    // Plain CSV text behind a `.bin` extension has no magic, so it stays
+    // unsupported (only the `.csv` extension routes to the sheet grid).
+    let csv_ext = dir.join("misnamed-csv.bin");
+    std::fs::write(&csv_ext, b"a,b,c\n1,2,3\n").expect("write csv text");
+    assert_eq!(classify_file(&csv_ext), FileKind::Unsupported);
+    let _ = std::fs::remove_file(&no_ext);
+    let _ = std::fs::remove_file(&bin_ext);
+    let _ = std::fs::remove_file(&doc_ext);
+    let _ = std::fs::remove_file(&csv_ext);
+  }
+
+  #[test]
+  fn spreadsheet_format_labels() {
+    assert_eq!(spreadsheet_format_label("xlsx"), "XLSX");
+    assert_eq!(spreadsheet_format_label("xls"), "XLS");
+    assert_eq!(spreadsheet_format_label("csv"), "CSV");
+    assert_eq!(spreadsheet_format_label("tsv"), "TSV");
+    assert_eq!(spreadsheet_format_label("ods"), "ODS");
+    assert_eq!(spreadsheet_format_label("bin"), "Spreadsheet");
   }
 
   #[test]
@@ -1651,12 +1805,13 @@ mod tests {
     docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
     std::fs::write(&bin_ext, docx).expect("write docx magic");
     assert_eq!(classify_file(&bin_ext), FileKind::Document);
-    // A spreadsheet package behind a `.bin` extension stays unsupported.
+    // A spreadsheet package behind a `.bin` extension opens as a
+    // spreadsheet via magic-byte sniffing.
     let sheet_ext = dir.join("misnamed-sheet.bin");
     let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
     xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
     std::fs::write(&sheet_ext, xlsx).expect("write xlsx magic");
-    assert_eq!(classify_file(&sheet_ext), FileKind::Unsupported);
+    assert_eq!(classify_file(&sheet_ext), FileKind::Spreadsheet);
     let _ = std::fs::remove_file(&no_ext);
     let _ = std::fs::remove_file(&bin_ext);
     let _ = std::fs::remove_file(&sheet_ext);

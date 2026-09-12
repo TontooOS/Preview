@@ -13,6 +13,8 @@ Word documents open read-only as formatted text
 (see [Docx.md](Docx.md)).
 Presentations open read-only as a slide viewer
 (see [Pptx.md](Pptx.md)).
+Spreadsheets open read-only as a sheet grid
+(see [Xlsx.md](Xlsx.md)).
 Saving is manual only. Unsupported files show a hint page instead of
 binary garbage.
 
@@ -21,7 +23,7 @@ binary garbage.
 From top to bottom the window contains:
 
 1. Header row: title plus subtitle on the left, actions on the right
-2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, or unsupported page
+2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
 3. Status line: line count and save state
 
 ```rust
@@ -44,7 +46,8 @@ app.run();
 | `Video` | `mp4`, `m4v`, `mkv`, `webm`, `mov`, `avi`, `ogv`, `flv`, `wmv`, `mpg`, `mpeg`, `3gp` | Read-only player with picture (see [Video.md](Video.md)) |
 | `Document` | `docx`, `odt`, `rtf`, `doc` | Read-only formatted text (see [Docx.md](Docx.md)) |
 | `Presentation` | `pptx`, `odp`, `ppt` | Read-only slide viewer (see [Pptx.md](Pptx.md)) |
-| `Unsupported` | `xlsx`, ... | Hint page, no binary load |
+| `Spreadsheet` | `xlsx`, `xls`, `csv`, `tsv`, `ods` | Read-only sheet grid (see [Xlsx.md](Xlsx.md)) |
+| `Unsupported` | `zip`, ... | Hint page, no binary load |
 
 ```rust
 pub fn classify(path: &Path) -> FileKind;
@@ -146,3 +149,4 @@ system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 - [Video.md](Video.md) – read-only video player
 - [Docx.md](Docx.md) – read-only word document viewer
 - [Pptx.md](Pptx.md) – read-only presentation slide viewer
+- [Xlsx.md](Xlsx.md) – read-only spreadsheet sheet viewer

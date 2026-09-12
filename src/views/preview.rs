@@ -13,7 +13,9 @@
 //! volume plus file info). Word documents open read-only as formatted text
 //! (`.docx` fully, `.odt`/`.rtf` best-effort, legacy `.doc` with an honest
 //! hint). Presentations open read-only as a slide viewer (previous/next,
-//! slide indicator, title plus body text, speaker notes). Saving is manual
+//! slide indicator, title plus body text, speaker notes). Spreadsheets open
+//! read-only as a sheet grid (sheet switcher, column letters plus row
+//! numbers, bold header row). Saving is manual
 //! only (`Save` button, `Ctrl+S`,
 //! close dialog with Cancel / Save / Don't Save).
 
@@ -22,6 +24,7 @@ use crate::lang;
 use crate::markdown;
 use crate::model::{self, FileKind};
 use crate::pptx;
+use crate::xlsx;
 use crate::UIKit::widget::{WidgetId, next_widget_id};
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -67,6 +70,9 @@ struct State {
   pres_deck: Option<pptx::Deck>,
   pres_error: Option<String>,
   pres_slide: usize,
+  sheet_book: Option<xlsx::Workbook>,
+  sheet_error: Option<String>,
+  sheet_index: usize,
 }
 
 impl State {
@@ -102,6 +108,9 @@ impl State {
       pres_deck: None,
       pres_error: None,
       pres_slide: 0,
+      sheet_book: None,
+      sheet_error: None,
+      sheet_index: 0,
     }
   }
 }
@@ -178,6 +187,18 @@ struct Widgets {
   pres_view: gtk::TextView,
   pres_buffer: gtk::TextBuffer,
   pres_error_lbl: gtk::Label,
+  sheet_bar: gtk::Box,
+  sheet_prev_btn: gtk::Button,
+  sheet_next_btn: gtk::Button,
+  sheet_label: gtk::Label,
+  sheet_tabs_scroll: gtk::ScrolledWindow,
+  sheet_tabs: gtk::Box,
+  sheet_title: gtk::Label,
+  sheet_info: gtk::Label,
+  sheet_scroll: gtk::ScrolledWindow,
+  sheet_grid: gtk::Grid,
+  sheet_hint_lbl: gtk::Label,
+  sheet_error_lbl: gtk::Label,
   root: gtk::Box,
 }
 
@@ -659,6 +680,77 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pres_box.append(&pres_error_lbl);
   stack.add_named(&pres_box, Some("pptx"));
 
+  // Spreadsheet page: toolbar (previous/next, sheet indicator) plus a
+  // sheet tab switcher, a title, an info line and a read-only grid
+  // (column letters, row numbers, bold header row). Broken or unsupported
+  // spreadsheets (corrupt, password-protected, legacy `.xls`) stay on
+  // this page and show an error hint with the reason.
+  let sheet_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  sheet_box.set_hexpand(true);
+  sheet_box.set_vexpand(true);
+  let sheet_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  sheet_bar.set_margin_start(16);
+  sheet_bar.set_margin_end(16);
+  sheet_bar.set_margin_top(8);
+  sheet_bar.set_margin_bottom(8);
+  let sheet_prev_btn = gtk::Button::with_label(&lang::t("xlsx.prev"));
+  let sheet_label = gtk::Label::new(Some(""));
+  sheet_label.set_hexpand(true);
+  sheet_label.add_css_class("dim-label");
+  let sheet_next_btn = gtk::Button::with_label(&lang::t("xlsx.next"));
+  sheet_bar.append(&sheet_prev_btn);
+  sheet_bar.append(&sheet_label);
+  sheet_bar.append(&sheet_next_btn);
+  sheet_box.append(&sheet_bar);
+  // Sheet tabs: one toggle button per sheet, only visible when the
+  // workbook holds multiple sheets.
+  let sheet_tabs = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+  sheet_tabs.set_margin_start(16);
+  sheet_tabs.set_margin_end(16);
+  sheet_tabs.set_halign(gtk::Align::Center);
+  let sheet_tabs_scroll = gtk::ScrolledWindow::new();
+  sheet_tabs_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
+  sheet_tabs_scroll.set_child(Some(&sheet_tabs));
+  sheet_box.append(&sheet_tabs_scroll);
+  let sheet_title = gtk::Label::new(Some(""));
+  sheet_title.add_css_class("xlsx-title");
+  let sheet_info = gtk::Label::new(Some(""));
+  sheet_info.add_css_class("dim-label");
+  sheet_info.set_wrap(true);
+  sheet_info.set_justify(gtk::Justification::Center);
+  sheet_info.set_margin_bottom(4);
+  sheet_box.append(&sheet_title);
+  sheet_box.append(&sheet_info);
+  let sheet_grid = gtk::Grid::new();
+  sheet_grid.set_row_spacing(2);
+  sheet_grid.set_column_spacing(12);
+  sheet_grid.set_margin_start(16);
+  sheet_grid.set_margin_end(16);
+  sheet_grid.set_margin_top(4);
+  sheet_grid.set_margin_bottom(12);
+  let sheet_scroll = gtk::ScrolledWindow::new();
+  sheet_scroll.set_hexpand(true);
+  sheet_scroll.set_vexpand(true);
+  sheet_scroll.set_child(Some(&sheet_grid));
+  sheet_box.append(&sheet_scroll);
+  // Shared hint slot: truncation note or empty-sheet note.
+  let sheet_hint_lbl = gtk::Label::new(Some(""));
+  sheet_hint_lbl.add_css_class("dim-label");
+  sheet_hint_lbl.set_wrap(true);
+  sheet_hint_lbl.set_justify(gtk::Justification::Center);
+  sheet_hint_lbl.set_margin_bottom(8);
+  sheet_box.append(&sheet_hint_lbl);
+  let sheet_error_lbl = gtk::Label::new(Some(""));
+  sheet_error_lbl.add_css_class("dim-label");
+  sheet_error_lbl.set_wrap(true);
+  sheet_error_lbl.set_justify(gtk::Justification::Center);
+  sheet_error_lbl.set_halign(gtk::Align::Center);
+  sheet_error_lbl.set_valign(gtk::Align::Center);
+  sheet_error_lbl.set_hexpand(true);
+  sheet_error_lbl.set_vexpand(true);
+  sheet_box.append(&sheet_error_lbl);
+  stack.add_named(&sheet_box, Some("xlsx"));
+
   root.append(&stack);
 
   // Status line.
@@ -754,6 +846,18 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     pres_view: pres_view.clone(),
     pres_buffer: pres_buffer.clone(),
     pres_error_lbl: pres_error_lbl.clone(),
+    sheet_bar: sheet_bar.clone(),
+    sheet_prev_btn: sheet_prev_btn.clone(),
+    sheet_next_btn: sheet_next_btn.clone(),
+    sheet_label: sheet_label.clone(),
+    sheet_tabs_scroll: sheet_tabs_scroll.clone(),
+    sheet_tabs: sheet_tabs.clone(),
+    sheet_title: sheet_title.clone(),
+    sheet_info: sheet_info.clone(),
+    sheet_scroll: sheet_scroll.clone(),
+    sheet_grid: sheet_grid.clone(),
+    sheet_hint_lbl: sheet_hint_lbl.clone(),
+    sheet_error_lbl: sheet_error_lbl.clone(),
     root: root.clone(),
   });
 
@@ -932,6 +1036,30 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
       let slide = model::clamp_page(state.borrow().pres_slide + 1, total);
       state.borrow_mut().pres_slide = slide;
       refresh_pres(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+
+  // Spreadsheet navigation: previous / next sheet (sheets are parsed
+  // eagerly, only the current one is rendered into the grid).
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    sheet_prev_btn.connect_clicked(move |_| {
+      let sheet = state.borrow().sheet_index.saturating_sub(1);
+      state.borrow_mut().sheet_index = sheet;
+      refresh_sheet(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    sheet_next_btn.connect_clicked(move |_| {
+      let total = state.borrow().sheet_book.as_ref().map(|b| b.sheet_count()).unwrap_or(0);
+      let sheet = model::clamp_page(state.borrow().sheet_index + 1, total);
+      state.borrow_mut().sheet_index = sheet;
+      refresh_sheet(&state, &widgets);
       refresh_chrome(&state, &widgets);
     });
   }
@@ -1127,7 +1255,8 @@ fn base_css() -> String {
      .video-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
      .docx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
-     .pptx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
+     .pptx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .xlsx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
   )
 }
 
@@ -1217,6 +1346,9 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   state.borrow_mut().pres_deck = None;
   state.borrow_mut().pres_error = None;
   state.borrow_mut().pres_slide = 0;
+  state.borrow_mut().sheet_book = None;
+  state.borrow_mut().sheet_error = None;
+  state.borrow_mut().sheet_index = 0;
   // Extension first, image/audio/video magic bytes second so misnamed
   // files still land on the picture viewer or a player instead of the
   // unsupported page.
@@ -1536,6 +1668,57 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     }
     return;
   }
+  if kind == FileKind::Spreadsheet {
+    match xlsx::load_workbook(path) {
+      Ok(book) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.sheet_book = Some(book);
+        st.sheet_error = None;
+        st.sheet_index = 0;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.sheet_book = None;
+        st.sheet_error = Some(reason);
+        st.sheet_index = 0;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
   match model::load_text(path) {
     Ok(text) => {
       let mut st = state.borrow_mut();
@@ -1581,7 +1764,7 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
 }
 
 /// Persist the edit buffer back to disk (manual save only, never for PDFs,
-/// images, audio, video, document or presentation files).
+/// images, audio, video, document, presentation or spreadsheet files).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if state.borrow().kind == FileKind::Pdf
     || state.borrow().kind == FileKind::Image
@@ -1589,6 +1772,7 @@ fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     || state.borrow().kind == FileKind::Video
     || state.borrow().kind == FileKind::Document
     || state.borrow().kind == FileKind::Presentation
+    || state.borrow().kind == FileKind::Spreadsheet
   {
     return;
   }
@@ -1630,6 +1814,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let is_video = has_file && st.kind == FileKind::Video;
   let is_doc = has_file && st.kind == FileKind::Document;
   let is_pres = has_file && st.kind == FileKind::Presentation;
+  let is_sheet = has_file && st.kind == FileKind::Spreadsheet;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -1698,6 +1883,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     widgets.status.set_text(&doc_status_text(&st));
   } else if is_pres {
     widgets.status.set_text(&pres_status_text(&st));
+  } else if is_sheet {
+    widgets.status.set_text(&sheet_status_text(&st));
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -1721,6 +1908,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "docx"
   } else if st.kind == FileKind::Presentation {
     "pptx"
+  } else if st.kind == FileKind::Spreadsheet {
+    "xlsx"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -1765,6 +1954,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Presentation {
     drop(st);
     refresh_pres(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Spreadsheet {
+    drop(st);
+    refresh_sheet(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -2518,6 +2712,194 @@ fn refresh_pres(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.pres_next_btn.set_sensitive(slide + 1 < total);
   if let Some(deck) = state.borrow().pres_deck.clone() {
     pptx::render_slide_into(&widgets.pres_buffer, &deck, slide);
+  }
+}
+
+/// Status line for spreadsheets: format, sheet count, current sheet
+/// dimensions plus file size, or the load reason when the file could not
+/// be parsed.
+fn sheet_status_text(st: &State) -> String {
+  match st.sheet_book.as_ref() {
+    Some(book) => {
+      let (rows, cols) = book.sheet_dims(st.sheet_index);
+      let dims = if rows == 0 && cols == 0 {
+        "empty".to_string()
+      } else {
+        format!("{rows}x{cols}")
+      };
+      lang::t_with(
+        "status.xlsx",
+        &[
+          ("format", book.format.as_str()),
+          ("sheets", &book.sheet_count().to_string()),
+          ("rows", dims.as_str()),
+          ("size", model::format_file_size(book.file_bytes).as_str()),
+        ],
+      )
+    }
+    None => {
+      let reason = st.sheet_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+      lang::t_with("xlsx.load_failed", &[("reason", &reason)])
+    }
+  }
+}
+
+/// Build the spreadsheet page: toolbar with the sheet indicator, sheet
+/// tabs (only for multi-sheet workbooks), title, info line and the
+/// current sheet rendered read-only into the grid, or the load error
+/// hint. Broken spreadsheets stay on the spreadsheet page and never fall
+/// through to the unsupported page.
+fn refresh_sheet(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let total = state.borrow().sheet_book.as_ref().map(|b| b.sheet_count()).unwrap_or(0);
+  let sheet = model::clamp_page(state.borrow().sheet_index, total);
+  state.borrow_mut().sheet_index = sheet;
+  let name = {
+    let st = state.borrow();
+    st.path.as_ref().map(|p| model::display_name(p)).unwrap_or_default()
+  };
+  widgets.sheet_title.set_text(&name);
+  if state.borrow().sheet_book.is_none() {
+    let reason = state
+      .borrow()
+      .sheet_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.sheet_bar.set_visible(false);
+    widgets.sheet_tabs_scroll.set_visible(false);
+    widgets.sheet_title.set_visible(false);
+    widgets.sheet_info.set_visible(false);
+    widgets.sheet_scroll.set_visible(false);
+    widgets.sheet_hint_lbl.set_visible(false);
+    widgets.sheet_error_lbl.set_visible(true);
+    widgets.sheet_error_lbl.set_text(&lang::t_with(
+      "xlsx.load_failed",
+      &[("reason", &reason)],
+    ));
+    return;
+  }
+  widgets.sheet_bar.set_visible(true);
+  widgets.sheet_title.set_visible(true);
+  widgets.sheet_info.set_visible(true);
+  widgets.sheet_scroll.set_visible(true);
+  widgets.sheet_error_lbl.set_visible(false);
+  let (book, truncated) = {
+    let st = state.borrow();
+    let book = st.sheet_book.clone().expect("sheet book present");
+    let truncated = book.truncated;
+    (book, truncated)
+  };
+  let sheet_name = book.sheets.get(sheet).map(|s| s.name.clone()).unwrap_or_default();
+  widgets.sheet_label.set_text(&lang::t_with(
+    "xlsx.sheet",
+    &[
+      ("page", &(sheet + 1).to_string()),
+      ("total", &total.to_string()),
+      ("name", &sheet_name),
+    ],
+  ));
+  widgets.sheet_prev_btn.set_sensitive(sheet > 0);
+  widgets.sheet_next_btn.set_sensitive(sheet + 1 < total);
+  widgets.sheet_info.set_text(&sheet_status_text(&state.borrow()));
+  rebuild_sheet_tabs(state, widgets, &book, sheet);
+  render_sheet_grid(widgets, &book, sheet);
+  // Hint slot: truncation note wins over the empty-sheet note.
+  let (rows, cols) = book.sheet_dims(sheet);
+  if rows == 0 && cols == 0 {
+    widgets.sheet_hint_lbl.set_visible(true);
+    widgets.sheet_hint_lbl.set_text(&lang::t("xlsx.empty_sheet"));
+  } else if truncated {
+    widgets.sheet_hint_lbl.set_visible(true);
+    widgets.sheet_hint_lbl.set_text(&lang::t_with(
+      "xlsx.truncated",
+      &[("rows", &rows.to_string()), ("cols", &cols.to_string())],
+    ));
+  } else {
+    widgets.sheet_hint_lbl.set_visible(false);
+  }
+}
+
+/// Rebuild the sheet tab switcher: one toggle button per sheet, active on
+/// the current sheet. Only visible for multi-sheet workbooks; programmatic
+/// `set_active` never emits `clicked`, so no feedback loop needs guarding.
+fn rebuild_sheet_tabs(
+  state: &Rc<RefCell<State>>,
+  widgets: &Rc<Widgets>,
+  book: &xlsx::Workbook,
+  current: usize,
+) {
+  while let Some(child) = widgets.sheet_tabs.first_child() {
+    widgets.sheet_tabs.remove(&child);
+  }
+  widgets.sheet_tabs_scroll.set_visible(book.sheet_count() > 1);
+  if book.sheet_count() <= 1 {
+    return;
+  }
+  for (index, sheet) in book.sheets.iter().enumerate() {
+    let tab = gtk::ToggleButton::with_label(&sheet.name);
+    tab.set_active(index == current);
+    let state = state.clone();
+    let tab_widgets = widgets.clone();
+    tab.connect_clicked(move |_| {
+      state.borrow_mut().sheet_index = index;
+      refresh_sheet(&state, &tab_widgets);
+      refresh_chrome(&state, &tab_widgets);
+    });
+    widgets.sheet_tabs.append(&tab);
+  }
+}
+
+/// Render one sheet into the grid: a corner cell plus column letters on
+/// the first row, row numbers in the first column and the data cells
+/// after them. The first data row renders bold as the header row;
+/// numeric cells align to the end. All text uses SF Pro Display via the
+/// base style; headers use the `dim-label` class plus bold markup.
+fn render_sheet_grid(widgets: &Rc<Widgets>, book: &xlsx::Workbook, index: usize) {
+  let grid = &widgets.sheet_grid;
+  while let Some(child) = grid.first_child() {
+    grid.remove(&child);
+  }
+  let Some(sheet) = book.sheets.get(index) else {
+    return;
+  };
+  let cols = sheet.rows.iter().map(|row| row.len()).max().unwrap_or(0);
+  // Header row: corner plus column letters.
+  for col in 0..cols {
+    let label = gtk::Label::new(None);
+    label.add_css_class("dim-label");
+    label.set_halign(gtk::Align::Start);
+    label.set_markup(&format!("<b>{}</b>", xlsx::col_letters(col)));
+    grid.attach(&label, (col + 1) as i32, 0, 1, 1);
+  }
+  for (row_idx, row) in sheet.rows.iter().enumerate() {
+    // Row number in the first column.
+    let number = gtk::Label::new(None);
+    number.add_css_class("dim-label");
+    number.set_halign(gtk::Align::End);
+    number.set_markup(&format!("<b>{}</b>", row_idx + 1));
+    grid.attach(&number, 0, (row_idx + 1) as i32, 1, 1);
+    for (col_idx, cell) in row.iter().enumerate() {
+      // Skip padding past the widest row (ragged rows are padded in the
+      // parser, so this only guards hand-built sheets in tests).
+      if col_idx >= cols {
+        continue;
+      }
+      let label = gtk::Label::new(None);
+      label.set_halign(if xlsx::is_number_text(cell) {
+        gtk::Align::End
+      } else {
+        gtk::Align::Start
+      });
+      label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+      label.set_max_width_chars(30);
+      if row_idx == 0 {
+        // Header row: bold markup with escaped text.
+        let escaped = glib::markup_escape_text(cell);
+        label.set_markup(&format!("<b>{escaped}</b>"));
+      } else {
+        label.set_text(cell);
+      }
+      grid.attach(&label, (col_idx + 1) as i32, (row_idx + 1) as i32, 1, 1);
+    }
   }
 }
 
