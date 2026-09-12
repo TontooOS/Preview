@@ -12,8 +12,11 @@
 //! play/pause, seek, volume plus file info (format, resolution when cheap,
 //! duration, size). Word documents open read-only as formatted text:
 //! `.docx` fully, `.odt` and `.rtf` on a best-effort basis, legacy `.doc`
-//! with an honest hint (see `wiki/Docx.md`). Anything else is rejected as
-//! unsupported with a hint (binary files are never loaded as text).
+//! with an honest hint (see `wiki/Docx.md`). Presentations open read-only
+//! as a slide viewer: `.pptx` fully, `.odp` on a best-effort basis, legacy
+//! `.ppt` with an honest hint (see `wiki/Pptx.md`). Anything else is
+//! rejected as unsupported with a hint (binary files are never loaded as
+//! text).
 
 use std::path::{Path, PathBuf};
 
@@ -36,7 +39,10 @@ pub enum FileKind {
   /// Document: read-only formatted text (`.docx` fully, `.odt`/`.rtf`
   /// best-effort, legacy `.doc` with an honest hint).
   Document,
-  /// Not supported yet (spreadsheets, presentations, binary).
+  /// Presentation: read-only slide viewer (`.pptx` fully, `.odp`
+  /// best-effort, legacy `.ppt` with an honest hint).
+  Presentation,
+  /// Not supported yet (spreadsheets, binary).
   Unsupported,
 }
 
@@ -82,6 +88,11 @@ pub const VIDEO_EXTENSIONS: &[&str] = &[
 /// legacy `.doc` (OLE) shows an honest hint since no decoder is available.
 pub const DOCUMENT_EXTENSIONS: &[&str] = &["docx", "odt", "rtf", "doc"];
 
+/// Presentations open read-only as a slide viewer (see `wiki/Pptx.md`).
+/// `.pptx` is parsed fully, `.odp` on a best-effort basis, legacy `.ppt`
+/// (OLE) shows an honest hint since no decoder is available.
+pub const PRESENTATION_EXTENSIONS: &[&str] = &["pptx", "odp", "ppt"];
+
 /// Max file size loaded as text in the basis version (8 MiB).
 pub const MAX_TEXT_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -110,6 +121,9 @@ pub fn classify(path: &Path) -> FileKind {
   if DOCUMENT_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Document;
   }
+  if PRESENTATION_EXTENSIONS.contains(&ext.as_str()) {
+    return FileKind::Presentation;
+  }
   if TEXT_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Text;
   }
@@ -127,18 +141,22 @@ pub fn classify(path: &Path) -> FileKind {
 /// header carries known audio magic, the file is treated as audio; when it
 /// carries known video magic, it is treated as video; when it carries known
 /// document magic (Word ZIP package, ODT package, RTF markup or legacy OLE),
-/// it is treated as a document. Other kinds are never
-/// changed by sniffing. Audio sniffing wins over video sniffing for shared
-/// containers (Ogg, ASF) since their headers cannot name the stream type
-/// cheaply; the `.ogv` and `.wmv` extensions still route to video first.
-/// Document sniffing only matches Word/ODT packages (never other ZIP files
-/// such as spreadsheets or presentations), RTF markup and OLE bytes.
+/// it is treated as a document; when it carries known presentation magic
+/// (PowerPoint ZIP package or ODP package), it is treated as a
+/// presentation. Other kinds are never changed by sniffing. Audio sniffing wins over video
+/// sniffing for shared containers (Ogg, ASF) since their headers cannot name
+/// the stream type cheaply; the `.ogv` and `.wmv` extensions still route to
+/// video first. Document sniffing only matches Word/ODT packages (never
+/// other ZIP files such as spreadsheets or presentations), RTF markup and
+/// OLE bytes. Presentation sniffing only matches PowerPoint/ODP packages
+/// (never other ZIP files such as spreadsheets or word documents).
 pub fn classify_file(path: &Path) -> FileKind {
   let by_ext = classify(path);
   if by_ext == FileKind::Image
     || by_ext == FileKind::Audio
     || by_ext == FileKind::Video
     || by_ext == FileKind::Document
+    || by_ext == FileKind::Presentation
   {
     return by_ext;
   }
@@ -156,6 +174,9 @@ pub fn classify_file(path: &Path) -> FileKind {
   }
   if sniff_document(&bytes) {
     return FileKind::Document;
+  }
+  if sniff_presentation(&bytes) {
+    return FileKind::Presentation;
   }
   by_ext
 }
@@ -461,6 +482,36 @@ fn is_ole_magic(bytes: &[u8]) -> bool {
   bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
 }
 
+/// Returns true when the bytes carry known presentation magic (see
+/// `wiki/Pptx.md` for the coverage table): a ZIP package (`PK\x03\x04`)
+/// holding `ppt/` parts (`.pptx`) or an ODP package (ZIP plus the
+/// OpenDocument presentation MIME type). Other ZIP files (spreadsheets,
+/// word documents, plain archives) never match. Legacy `.ppt` (OLE) files
+/// have no cheap distinguishing magic, so they are only classified by
+/// extension.
+pub fn sniff_presentation(bytes: &[u8]) -> bool {
+  is_pptx_zip(bytes) || is_odp_zip(bytes)
+}
+
+/// `.pptx` package: ZIP magic plus a `ppt/` part name in the prefix. The
+/// 4 KiB prefix holds the first local headers, so misnamed packages still
+/// match; other OOXML packages (`word/`, `xl/`) never match.
+fn is_pptx_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"ppt/").is_some()
+}
+
+/// ODP package: ZIP magic plus the OpenDocument presentation MIME type of
+/// the leading stored `mimetype` entry.
+fn is_odp_zip(bytes: &[u8]) -> bool {
+  if !is_zip_magic(bytes) {
+    return false;
+  }
+  find_subslice(bytes, b"application/vnd.oasis.opendocument.presentation").is_some()
+}
+
 /// Short display label for a document extension (lowercase, without dot).
 /// Unknown extensions report `Document` so sniffed files still get a label.
 pub fn document_format_label(ext: &str) -> &'static str {
@@ -470,6 +521,18 @@ pub fn document_format_label(ext: &str) -> &'static str {
     "rtf" => "RTF",
     "doc" => "DOC",
     _ => "Document",
+  }
+}
+
+/// Short display label for a presentation extension (lowercase, without
+/// dot). Unknown extensions report `Presentation` so sniffed files still
+/// get a label.
+pub fn presentation_format_label(ext: &str) -> &'static str {
+  match ext {
+    "pptx" => "PPTX",
+    "odp" => "ODP",
+    "ppt" => "PPT",
+    _ => "Presentation",
   }
 }
 
@@ -1458,8 +1521,79 @@ mod tests {
   #[test]
   fn unsupported_classified() {
     assert_eq!(classify(Path::new("sheet.xlsx")), FileKind::Unsupported);
-    assert_eq!(classify(Path::new("slides.pptx")), FileKind::Unsupported);
     assert_eq!(classify(Path::new("archive.zip")), FileKind::Unsupported);
+  }
+
+  #[test]
+  fn presentation_extensions_classified() {
+    for name in [
+      "slides.pptx",
+      "slides.PPTX",
+      "deck.odp",
+      "deck.ODP",
+      "legacy.ppt",
+      "legacy.PPT",
+    ] {
+      assert_eq!(classify(Path::new(name)), FileKind::Presentation, "failed for {name}");
+    }
+  }
+
+  #[test]
+  fn presentation_magic_sniffed() {
+    // Minimal .pptx local header with a `ppt/` part name.
+    let mut pptx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    pptx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00ppt/presentation.xml");
+    assert!(sniff_presentation(&pptx));
+    // Minimal ODP: ZIP magic plus the OpenDocument presentation MIME type.
+    let mut odp = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    odp.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.presentation");
+    assert!(sniff_presentation(&odp));
+    // Never a presentation: other ZIP files, spreadsheets and documents.
+    let mut xlsx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    xlsx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00xl/workbook.xml");
+    assert!(!sniff_presentation(&xlsx));
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    assert!(!sniff_presentation(&docx));
+    assert!(!sniff_presentation(b"PK\x03\x04plain zip without office parts"));
+    assert!(!sniff_presentation(b"hello world"));
+    assert!(!sniff_presentation(b"%PDF-1.4"));
+    assert!(!sniff_presentation(b""));
+  }
+
+  #[test]
+  fn misnamed_presentation_sniffed_as_presentation() {
+    let dir = std::env::temp_dir().join("preview-pres-test");
+    let _ = std::fs::create_dir_all(&dir);
+    // PPTX magic without any extension still opens as a presentation.
+    let no_ext = dir.join("misnamed-no-ext-pres");
+    let mut pptx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    pptx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00ppt/presentation.xml");
+    std::fs::write(&no_ext, pptx).expect("write pptx magic");
+    assert_eq!(classify_file(&no_ext), FileKind::Presentation);
+    // ODP magic behind a `.bin` extension still opens as a presentation.
+    let bin_ext = dir.join("misnamed-pres.bin");
+    let mut odp = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    odp.extend_from_slice(b"mimetypeapplication/vnd.oasis.opendocument.presentation");
+    std::fs::write(&bin_ext, odp).expect("write odp magic");
+    assert_eq!(classify_file(&bin_ext), FileKind::Presentation);
+    // A word document package behind a `.bin` extension stays a document.
+    let doc_ext = dir.join("misnamed-word.bin");
+    let mut docx = Vec::from([0x50, 0x4B, 0x03, 0x04].as_slice());
+    docx.extend_from_slice(b"\x14\x00\x00\x00\x08\x00word/document.xml");
+    std::fs::write(&doc_ext, docx).expect("write docx magic");
+    assert_eq!(classify_file(&doc_ext), FileKind::Document);
+    let _ = std::fs::remove_file(&no_ext);
+    let _ = std::fs::remove_file(&bin_ext);
+    let _ = std::fs::remove_file(&doc_ext);
+  }
+
+  #[test]
+  fn presentation_format_labels() {
+    assert_eq!(presentation_format_label("pptx"), "PPTX");
+    assert_eq!(presentation_format_label("odp"), "ODP");
+    assert_eq!(presentation_format_label("ppt"), "PPT");
+    assert_eq!(presentation_format_label("bin"), "Presentation");
   }
 
   #[test]

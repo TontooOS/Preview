@@ -5,7 +5,9 @@
 //! a rendered preview plus raw edit mode; PDFs open read-only with page
 //! navigation, page indicator, zoom and fit width; images open read-only
 //! as pictures with zoom and fit window; audio files open read-only in a
-//! compact player with play/pause, seek and volume. Saving is manual only
+//! compact player with play/pause, seek and volume; presentations open
+//! read-only as a slide viewer with previous/next navigation. Saving is
+//! manual only
 //! (`Save`, `Ctrl+S`, close dialog). Opens via CLI (`preview /path/to/file`)
 //! or the native file dialog. Follows the live system color scheme
 //! (Dark `#1d1d1d`, Light `#ececec`).
@@ -14,6 +16,7 @@ mod docx;
 mod lang;
 mod markdown;
 mod model;
+mod pptx;
 mod views;
 
 sdk::preinclude!();

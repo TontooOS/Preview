@@ -52,5 +52,12 @@
   "status.video": "%format%, %resolution%%duration%, %size%, read-only",
   "docx.load_failed": "Cannot open this document: %reason%",
   "docx.truncated": "Large document: showing the first %count% blocks",
-  "status.docx": "%format%, %paragraphs% paragraphs, %words% words, %size%, read-only"
+  "status.docx": "%format%, %paragraphs% paragraphs, %words% words, %size%, read-only",
+  "pptx.prev": "Previous",
+  "pptx.next": "Next",
+  "pptx.slide": "Slide %page% of %total%",
+  "pptx.load_failed": "Cannot open this presentation: %reason%",
+  "pptx.notes": "Notes",
+  "pptx.truncated": "Large deck: showing the first %count% slides",
+  "status.pptx": "%format%, %slides% slides, %words% words, %size%, read-only"
 }

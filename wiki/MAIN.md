@@ -24,6 +24,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Audio | [Audio.md](Audio.md) | Read-only audio player with play/pause, seek, volume and file info |
 | Video | [Video.md](Video.md) | Read-only video player with picture, play/pause, seek, volume and file info |
 | Docx | [Docx.md](Docx.md) | Read-only word document viewer with formatted text, lists and tables |
+| Pptx | [Pptx.md](Pptx.md) | Read-only presentation slide viewer with navigation, formatted text and speaker notes |
 
 ## Quick Start
 
@@ -77,6 +78,13 @@ See [Preview.md](Preview.md) for details.
   text, headings, bold/italic, bulleted lists and tables as a plain grid;
   `docx` fully plus `odt` and `rtf` best-effort plus an honest hint for
   legacy `doc`, magic-byte sniffing, corrupt/password/oversized hints,
-  `docx.*` and `status.docx` keys in `lang/en_us.json` and
-  `lang/de_de.json`; `flate2` and `quick-xml` are now direct dependencies
-  from the existing lock closure, see `wiki/Docx.md`).
+   `docx.*` and `status.docx` keys in `lang/en_us.json` and
+   `lang/de_de.json`; `flate2` and `quick-xml` are now direct dependencies
+   from the existing lock closure, see `wiki/Docx.md`).
+- 2026-09-12: Pptx support (read-only presentation slide viewer with
+  previous/next navigation, slide indicator, title plus body text,
+  bold/italic, leveled bullets, tables as a plain grid and dim speaker
+  notes; `pptx` fully plus `odp` best-effort plus an honest hint for
+  legacy `ppt`, magic-byte sniffing, corrupt/password/oversized hints,
+  `pptx.*` and `status.pptx` keys in `lang/en_us.json` and
+  `lang/de_de.json`; no new dependency, see `wiki/Pptx.md`).

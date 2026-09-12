@@ -52,5 +52,12 @@
   "status.video": "%format%, %resolution%%duration%, %size%, schreibgeschützt",
   "docx.load_failed": "Dieses Dokument kann nicht geöffnet werden: %reason%",
   "docx.truncated": "Großes Dokument: die ersten %count% Blöcke werden gezeigt",
-  "status.docx": "%format%, %paragraphs% Absätze, %words% Wörter, %size%, schreibgeschützt"
+  "status.docx": "%format%, %paragraphs% Absätze, %words% Wörter, %size%, schreibgeschützt",
+  "pptx.prev": "Zurück",
+  "pptx.next": "Weiter",
+  "pptx.slide": "Folie %page% von %total%",
+  "pptx.load_failed": "Diese Präsentation kann nicht geöffnet werden: %reason%",
+  "pptx.notes": "Notizen",
+  "pptx.truncated": "Große Präsentation: die ersten %count% Folien werden gezeigt",
+  "status.pptx": "%format%, %slides% Folien, %words% Wörter, %size%, schreibgeschützt"
 }

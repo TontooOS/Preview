@@ -12,13 +12,16 @@
 //! (`gtk::Video` driven by `gtk::MediaFile` with play/pause, seek slider,
 //! volume plus file info). Word documents open read-only as formatted text
 //! (`.docx` fully, `.odt`/`.rtf` best-effort, legacy `.doc` with an honest
-//! hint). Saving is manual only (`Save` button, `Ctrl+S`,
+//! hint). Presentations open read-only as a slide viewer (previous/next,
+//! slide indicator, title plus body text, speaker notes). Saving is manual
+//! only (`Save` button, `Ctrl+S`,
 //! close dialog with Cancel / Save / Don't Save).
 
 use crate::docx;
 use crate::lang;
 use crate::markdown;
 use crate::model::{self, FileKind};
+use crate::pptx;
 use crate::UIKit::widget::{WidgetId, next_widget_id};
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -61,6 +64,9 @@ struct State {
   video_volume: f64,
   doc_doc: Option<docx::Document>,
   doc_error: Option<String>,
+  pres_deck: Option<pptx::Deck>,
+  pres_error: Option<String>,
+  pres_slide: usize,
 }
 
 impl State {
@@ -93,6 +99,9 @@ impl State {
       video_volume: 1.0,
       doc_doc: None,
       doc_error: None,
+      pres_deck: None,
+      pres_error: None,
+      pres_slide: 0,
     }
   }
 }
@@ -159,6 +168,16 @@ struct Widgets {
   doc_view: gtk::TextView,
   doc_buffer: gtk::TextBuffer,
   doc_error_lbl: gtk::Label,
+  pres_bar: gtk::Box,
+  pres_prev_btn: gtk::Button,
+  pres_next_btn: gtk::Button,
+  pres_label: gtk::Label,
+  pres_title: gtk::Label,
+  pres_info: gtk::Label,
+  pres_scroll: gtk::ScrolledWindow,
+  pres_view: gtk::TextView,
+  pres_buffer: gtk::TextBuffer,
+  pres_error_lbl: gtk::Label,
   root: gtk::Box,
 }
 
@@ -582,6 +601,64 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   doc_box.append(&doc_error_lbl);
   stack.add_named(&doc_box, Some("docx"));
 
+  // Presentation page: toolbar (previous/next, slide indicator) plus a
+  // title, an info line and a read-only formatted slide view (title, body
+  // text, tables as a plain grid, dim speaker notes). Broken or
+  // unsupported presentations (corrupt, password-protected, legacy `.ppt`)
+  // stay on this page and show an error hint with the reason.
+  let pres_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  pres_box.set_hexpand(true);
+  pres_box.set_vexpand(true);
+  let pres_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  pres_bar.set_margin_start(16);
+  pres_bar.set_margin_end(16);
+  pres_bar.set_margin_top(8);
+  pres_bar.set_margin_bottom(8);
+  let pres_prev_btn = gtk::Button::with_label(&lang::t("pptx.prev"));
+  let pres_label = gtk::Label::new(Some(""));
+  pres_label.set_hexpand(true);
+  pres_label.add_css_class("dim-label");
+  let pres_next_btn = gtk::Button::with_label(&lang::t("pptx.next"));
+  pres_bar.append(&pres_prev_btn);
+  pres_bar.append(&pres_label);
+  pres_bar.append(&pres_next_btn);
+  pres_box.append(&pres_bar);
+  let pres_title = gtk::Label::new(Some(""));
+  pres_title.add_css_class("pptx-title");
+  let pres_info = gtk::Label::new(Some(""));
+  pres_info.add_css_class("dim-label");
+  pres_info.set_wrap(true);
+  pres_info.set_justify(gtk::Justification::Center);
+  pres_info.set_margin_bottom(4);
+  pres_box.append(&pres_title);
+  pres_box.append(&pres_info);
+  let pres_buffer = gtk::TextBuffer::new(None);
+  let pres_view = gtk::TextView::with_buffer(&pres_buffer);
+  pres_view.set_editable(false);
+  pres_view.set_cursor_visible(false);
+  pres_view.set_wrap_mode(gtk::WrapMode::WordChar);
+  pres_view.set_hexpand(true);
+  pres_view.set_vexpand(true);
+  pres_view.set_left_margin(16);
+  pres_view.set_right_margin(16);
+  pres_view.set_top_margin(12);
+  pres_view.set_bottom_margin(12);
+  let pres_scroll = gtk::ScrolledWindow::new();
+  pres_scroll.set_hexpand(true);
+  pres_scroll.set_vexpand(true);
+  pres_scroll.set_child(Some(&pres_view));
+  pres_box.append(&pres_scroll);
+  let pres_error_lbl = gtk::Label::new(Some(""));
+  pres_error_lbl.add_css_class("dim-label");
+  pres_error_lbl.set_wrap(true);
+  pres_error_lbl.set_justify(gtk::Justification::Center);
+  pres_error_lbl.set_halign(gtk::Align::Center);
+  pres_error_lbl.set_valign(gtk::Align::Center);
+  pres_error_lbl.set_hexpand(true);
+  pres_error_lbl.set_vexpand(true);
+  pres_box.append(&pres_error_lbl);
+  stack.add_named(&pres_box, Some("pptx"));
+
   root.append(&stack);
 
   // Status line.
@@ -667,6 +744,16 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     doc_view: doc_view.clone(),
     doc_buffer: doc_buffer.clone(),
     doc_error_lbl: doc_error_lbl.clone(),
+    pres_bar: pres_bar.clone(),
+    pres_prev_btn: pres_prev_btn.clone(),
+    pres_next_btn: pres_next_btn.clone(),
+    pres_label: pres_label.clone(),
+    pres_title: pres_title.clone(),
+    pres_info: pres_info.clone(),
+    pres_scroll: pres_scroll.clone(),
+    pres_view: pres_view.clone(),
+    pres_buffer: pres_buffer.clone(),
+    pres_error_lbl: pres_error_lbl.clone(),
     root: root.clone(),
   });
 
@@ -821,6 +908,30 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
       let page = model::clamp_page(state.borrow().pdf_page + 1, total);
       state.borrow_mut().pdf_page = page;
       refresh_pdf(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+
+  // Presentation navigation: previous / next slide (slides are parsed
+  // eagerly, only the current one is rendered).
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    pres_prev_btn.connect_clicked(move |_| {
+      let slide = state.borrow().pres_slide.saturating_sub(1);
+      state.borrow_mut().pres_slide = slide;
+      refresh_pres(&state, &widgets);
+      refresh_chrome(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    pres_next_btn.connect_clicked(move |_| {
+      let total = state.borrow().pres_deck.as_ref().map(|d| d.slide_count()).unwrap_or(0);
+      let slide = model::clamp_page(state.borrow().pres_slide + 1, total);
+      state.borrow_mut().pres_slide = slide;
+      refresh_pres(&state, &widgets);
       refresh_chrome(&state, &widgets);
     });
   }
@@ -1015,7 +1126,8 @@ fn base_css() -> String {
      .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
      .video-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
-     .docx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
+     .docx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .pptx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
   )
 }
 
@@ -1097,10 +1209,14 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   // Switching files always stops media playback first.
   stop_audio(state);
   stop_video(state, widgets);
-  // Switching files always drops the previous document, so stale blocks
-  // never leak into another file (every branch below sets its own kind).
+  // Switching files always drops the previous document and deck, so stale
+  // blocks never leak into another file (every branch below sets its own
+  // kind).
   state.borrow_mut().doc_doc = None;
   state.borrow_mut().doc_error = None;
+  state.borrow_mut().pres_deck = None;
+  state.borrow_mut().pres_error = None;
+  state.borrow_mut().pres_slide = 0;
   // Extension first, image/audio/video magic bytes second so misnamed
   // files still land on the picture viewer or a player instead of the
   // unsupported page.
@@ -1369,6 +1485,57 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     }
     return;
   }
+  if kind == FileKind::Presentation {
+    match pptx::load_presentation(path) {
+      Ok(deck) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.pres_deck = Some(deck);
+        st.pres_error = None;
+        st.pres_slide = 0;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
+        st.pres_deck = None;
+        st.pres_error = Some(reason);
+        st.pres_slide = 0;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
   match model::load_text(path) {
     Ok(text) => {
       let mut st = state.borrow_mut();
@@ -1414,13 +1581,14 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
 }
 
 /// Persist the edit buffer back to disk (manual save only, never for PDFs,
-/// images, audio, video or document files).
+/// images, audio, video, document or presentation files).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if state.borrow().kind == FileKind::Pdf
     || state.borrow().kind == FileKind::Image
     || state.borrow().kind == FileKind::Audio
     || state.borrow().kind == FileKind::Video
     || state.borrow().kind == FileKind::Document
+    || state.borrow().kind == FileKind::Presentation
   {
     return;
   }
@@ -1461,6 +1629,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let is_audio = has_file && st.kind == FileKind::Audio;
   let is_video = has_file && st.kind == FileKind::Video;
   let is_doc = has_file && st.kind == FileKind::Document;
+  let is_pres = has_file && st.kind == FileKind::Presentation;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -1527,6 +1696,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     widgets.status.set_text(&video_status_text(&st));
   } else if is_doc {
     widgets.status.set_text(&doc_status_text(&st));
+  } else if is_pres {
+    widgets.status.set_text(&pres_status_text(&st));
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -1548,6 +1719,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "video"
   } else if st.kind == FileKind::Document {
     "docx"
+  } else if st.kind == FileKind::Presentation {
+    "pptx"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -1587,6 +1760,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Document {
     drop(st);
     refresh_docx(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Presentation {
+    drop(st);
+    refresh_pres(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -2273,6 +2451,73 @@ fn refresh_docx(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.doc_info.set_text(&doc_status_text(&state.borrow()));
   if let Some(doc) = state.borrow().doc_doc.clone() {
     docx::render_into(&widgets.doc_buffer, &doc);
+  }
+}
+
+/// Status line for presentations: format, slide and word counts plus file
+/// size, or the load reason when the file could not be parsed.
+fn pres_status_text(st: &State) -> String {
+  match st.pres_deck.as_ref() {
+    Some(deck) => lang::t_with(
+      "status.pptx",
+      &[
+        ("format", deck.format.as_str()),
+        ("slides", &deck.slide_count().to_string()),
+        ("words", &deck.word_count().to_string()),
+        ("size", model::format_file_size(deck.file_bytes).as_str()),
+      ],
+    ),
+    None => {
+      let reason = st.pres_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+      lang::t_with("pptx.load_failed", &[("reason", &reason)])
+    }
+  }
+}
+
+/// Build the presentation page: toolbar with the slide indicator, title,
+/// info line and the current slide rendered read-only, or the load error
+/// hint. Broken presentations stay on the presentation page and never fall
+/// through to the unsupported page.
+fn refresh_pres(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let total = state.borrow().pres_deck.as_ref().map(|d| d.slide_count()).unwrap_or(0);
+  let slide = model::clamp_page(state.borrow().pres_slide, total);
+  state.borrow_mut().pres_slide = slide;
+  let name = {
+    let st = state.borrow();
+    st.path.as_ref().map(|p| model::display_name(p)).unwrap_or_default()
+  };
+  widgets.pres_title.set_text(&name);
+  if state.borrow().pres_deck.is_none() {
+    let reason = state
+      .borrow()
+      .pres_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.pres_bar.set_visible(false);
+    widgets.pres_title.set_visible(false);
+    widgets.pres_info.set_visible(false);
+    widgets.pres_scroll.set_visible(false);
+    widgets.pres_error_lbl.set_visible(true);
+    widgets.pres_error_lbl.set_text(&lang::t_with(
+      "pptx.load_failed",
+      &[("reason", &reason)],
+    ));
+    return;
+  }
+  widgets.pres_bar.set_visible(true);
+  widgets.pres_title.set_visible(true);
+  widgets.pres_info.set_visible(true);
+  widgets.pres_scroll.set_visible(true);
+  widgets.pres_error_lbl.set_visible(false);
+  widgets.pres_info.set_text(&pres_status_text(&state.borrow()));
+  widgets.pres_label.set_text(&lang::t_with(
+    "pptx.slide",
+    &[("page", &(slide + 1).to_string()), ("total", &total.to_string())],
+  ));
+  widgets.pres_prev_btn.set_sensitive(slide > 0);
+  widgets.pres_next_btn.set_sensitive(slide + 1 < total);
+  if let Some(deck) = state.borrow().pres_deck.clone() {
+    pptx::render_slide_into(&widgets.pres_buffer, &deck, slide);
   }
 }
 
