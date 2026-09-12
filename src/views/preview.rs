@@ -6,7 +6,9 @@
 //! shows raw text with line numbers on the left. PDFs open read-only in
 //! a page viewer (previous/next, page indicator, zoom, fit width). Images
 //! open read-only as actual pictures (`gtk::Picture` with zoom in/out
-//! plus fit window). Saving is manual only (`Save` button, `Ctrl+S`,
+//! plus fit window). Audio files open read-only in a compact player
+//! (`gtk::MediaFile` with play/pause, seek slider, volume plus file
+//! info). Saving is manual only (`Save` button, `Ctrl+S`,
 //! close dialog with Cancel / Save / Don't Save).
 
 use crate::lang;
@@ -42,6 +44,11 @@ struct State {
   img_base: Option<gdk_pixbuf::Pixbuf>,
   img_zoom: f64,
   img_fit: bool,
+  audio_meta: Option<model::AudioMeta>,
+  audio_error: Option<String>,
+  audio_media: Option<gtk::MediaFile>,
+  audio_tick: Option<glib::SourceId>,
+  audio_volume: f64,
 }
 
 impl State {
@@ -62,6 +69,11 @@ impl State {
       img_base: None,
       img_zoom: 1.0,
       img_fit: true,
+      audio_meta: None,
+      audio_error: None,
+      audio_media: None,
+      audio_tick: None,
+      audio_volume: 1.0,
     }
   }
 }
@@ -103,6 +115,15 @@ struct Widgets {
   img_scroll: gtk::ScrolledWindow,
   img_picture: gtk::Picture,
   img_error: gtk::Label,
+  audio_play_btn: gtk::Button,
+  audio_seek: gtk::Scale,
+  audio_time: gtk::Label,
+  audio_title: gtk::Label,
+  audio_info: gtk::Label,
+  audio_vol: gtk::Scale,
+  audio_vol_row: gtk::Box,
+  audio_error_lbl: gtk::Label,
+  audio_controls: gtk::Box,
   root: gtk::Box,
 }
 
@@ -363,6 +384,62 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   img_box.append(&img_error);
   stack.add_named(&img_box, Some("image"));
 
+  // Audio page: compact player with play/pause, a seek slider with
+  // elapsed/total time, a volume slider and a file info line. Playback
+  // is GStreamer-backed (`gtk::MediaFile`); files without a decoder show
+  // an honest hint with the stream error instead of crashing.
+  let audio_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
+  audio_box.set_halign(gtk::Align::Center);
+  audio_box.set_valign(gtk::Align::Center);
+  audio_box.set_hexpand(true);
+  audio_box.set_vexpand(true);
+  audio_box.set_margin_start(32);
+  audio_box.set_margin_end(32);
+  let audio_title = gtk::Label::new(Some(""));
+  audio_title.add_css_class("audio-title");
+  let audio_info = gtk::Label::new(Some(""));
+  audio_info.add_css_class("dim-label");
+  audio_info.set_wrap(true);
+  audio_info.set_justify(gtk::Justification::Center);
+  audio_box.append(&audio_title);
+  audio_box.append(&audio_info);
+  let audio_controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+  audio_controls.set_halign(gtk::Align::Center);
+  audio_controls.set_hexpand(true);
+  let audio_play_btn = gtk::Button::with_label(&lang::t("audio.play"));
+  audio_play_btn.add_css_class("suggested-action");
+  let audio_seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1000.0, 1.0);
+  audio_seek.set_draw_value(false);
+  audio_seek.set_hexpand(true);
+  audio_seek.set_size_request(360, -1);
+  let audio_time = gtk::Label::new(Some(&lang::t_with(
+    "audio.position",
+    &[("elapsed", "0:00"), ("total", "--:--")],
+  )));
+  audio_time.add_css_class("audio-time");
+  audio_time.add_css_class("dim-label");
+  audio_controls.append(&audio_play_btn);
+  audio_controls.append(&audio_seek);
+  audio_controls.append(&audio_time);
+  audio_box.append(&audio_controls);
+  let audio_vol_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  audio_vol_row.set_halign(gtk::Align::Center);
+  let audio_vol_label = gtk::Label::new(Some(&lang::t("audio.volume")));
+  audio_vol_label.add_css_class("dim-label");
+  let audio_vol = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+  audio_vol.set_draw_value(false);
+  audio_vol.set_size_request(160, -1);
+  audio_vol.set_value(100.0);
+  audio_vol_row.append(&audio_vol_label);
+  audio_vol_row.append(&audio_vol);
+  audio_box.append(&audio_vol_row);
+  let audio_error_lbl = gtk::Label::new(Some(""));
+  audio_error_lbl.add_css_class("dim-label");
+  audio_error_lbl.set_wrap(true);
+  audio_error_lbl.set_justify(gtk::Justification::Center);
+  audio_box.append(&audio_error_lbl);
+  stack.add_named(&audio_box, Some("audio"));
+
   root.append(&stack);
 
   // Status line.
@@ -423,6 +500,15 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     img_scroll: img_scroll.clone(),
     img_picture: img_picture.clone(),
     img_error: img_error.clone(),
+    audio_play_btn: audio_play_btn.clone(),
+    audio_seek: audio_seek.clone(),
+    audio_time: audio_time.clone(),
+    audio_title: audio_title.clone(),
+    audio_info: audio_info.clone(),
+    audio_vol: audio_vol.clone(),
+    audio_vol_row: audio_vol_row.clone(),
+    audio_error_lbl: audio_error_lbl.clone(),
+    audio_controls: audio_controls.clone(),
     root: root.clone(),
   });
 
@@ -473,6 +559,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
       let widgets = widgets.clone();
       let force = force.clone();
       window.connect_close_request(move |win| {
+        // Never let audio survive the window, even with unsaved changes
+        // pending in another file (audio itself is never dirty).
+        stop_audio(&state);
         if force.get() || !state.borrow().dirty {
           return false.into();
         }
@@ -643,6 +732,61 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
+  // Audio player: play/pause toggle, seek slider (0..1000 permille of
+  // the known duration) and volume slider (0..100 percent). The seek
+  // scale only handles user drags (`change-value`); the timer tick sets
+  // the position programmatically, so no feedback loop needs guarding.
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    audio_play_btn.connect_clicked(move |_| {
+      let media = state.borrow().audio_media.clone();
+      if let Some(media) = media.as_ref() {
+        if media.is_playing() {
+          media.pause();
+        } else {
+          media.play();
+        }
+      }
+      update_audio_ui(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    audio_seek.connect_change_value(move |_, _, value| {
+      let (media, duration) = {
+        let st = state.borrow();
+        (st.audio_media.clone(), audio_known_duration(&st))
+      };
+      if let (Some(media), Some(duration)) = (media.as_ref(), duration) {
+        if media.is_seekable() && duration > 0.0 {
+          let target = model::clamp_audio_seek(value / 1000.0 * duration, duration);
+          media.seek((target * 1_000_000.0) as i64);
+        }
+      }
+      glib::Propagation::Proceed
+    });
+  }
+  {
+    let state = state.clone();
+    audio_vol.connect_change_value(move |_, _, value| {
+      let volume = (value / 100.0).clamp(0.0, 1.0);
+      state.borrow_mut().audio_volume = volume;
+      if let Some(media) = state.borrow().audio_media.clone() {
+        media.set_volume(volume);
+      }
+      glib::Propagation::Proceed
+    });
+  }
+  // Stop playback when the window is torn down (the close-request handler
+  // below also stops it so no audio survives the window).
+  {
+    let state = state.clone();
+    root.connect_unrealize(move |_| {
+      stop_audio(&state);
+    });
+  }
+
   // Initial file from CLI (`preview /path/to/file`).
   if let Some(path) = initial {
     open_path(&state, &widgets, &path);
@@ -659,7 +803,9 @@ fn base_css() -> String {
      textview.mono {{ font-family: 'SF Mono', Monospace; }}\
      .dim-label {{ opacity: 0.6; }}\
      .title-1 {{ font-family: '{SF_PRO}'; font-size: 22pt; font-weight: 800; }}\
-     .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
+     .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .audio-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}"
   )
 }
 
@@ -738,8 +884,11 @@ fn confirm_discard(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, proceed: R
 
 /// Load a path into the state and refresh the UI.
 fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) {
-  // Extension first, image magic bytes second so misnamed files still land
-  // on the picture viewer instead of the unsupported page.
+  // Switching files always stops audio playback first.
+  stop_audio(state);
+  // Extension first, image and audio magic bytes second so misnamed files
+  // still land on the picture viewer or the player instead of the
+  // unsupported page.
   let kind = model::classify_file(path);
   if kind == FileKind::Pdf {
     match model::PdfDoc::open(path) {
@@ -755,6 +904,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_meta = None;
         st.img_error = None;
         st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -771,6 +922,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_meta = None;
         st.img_error = None;
         st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = Some(reason);
@@ -792,6 +945,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_meta = Some(meta);
         st.img_error = None;
         st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
         st.img_zoom = 1.0;
         st.img_fit = true;
         st.dirty = false;
@@ -811,6 +966,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_meta = None;
         st.img_error = Some(reason);
         st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -830,12 +987,59 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     st.img_meta = None;
     st.img_error = None;
     st.img_base = None;
+    st.audio_meta = None;
+    st.audio_error = None;
     st.dirty = false;
     st.mode = Mode::Preview;
     st.error = None;
     drop(st);
     refresh_chrome(state, widgets);
     refresh_body(state, widgets);
+    return;
+  }
+  if kind == FileKind::Audio {
+    match model::probe_audio(path) {
+      Ok(meta) => {
+        let volume = state.borrow().audio_volume;
+        let media = gtk::MediaFile::for_file(&gtk::gio::File::for_path(path));
+        media.set_volume(volume);
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = Some(meta);
+        st.audio_error = None;
+        st.audio_media = Some(media);
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = Some(reason);
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
     return;
   }
   match model::load_text(path) {
@@ -848,6 +1052,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.img_meta = None;
       st.img_error = None;
       st.img_base = None;
+      st.audio_meta = None;
+      st.audio_error = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = None;
@@ -864,6 +1070,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.img_meta = None;
       st.img_error = None;
       st.img_base = None;
+      st.audio_meta = None;
+      st.audio_error = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = Some(reason);
@@ -874,10 +1082,13 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
   }
 }
 
-/// Persist the edit buffer back to disk (manual save only, never for PDFs
-/// or images).
+/// Persist the edit buffer back to disk (manual save only, never for PDFs,
+/// images or audio files).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
-  if state.borrow().kind == FileKind::Pdf || state.borrow().kind == FileKind::Image {
+  if state.borrow().kind == FileKind::Pdf
+    || state.borrow().kind == FileKind::Image
+    || state.borrow().kind == FileKind::Audio
+  {
     return;
   }
   let path = match state.borrow().path.clone() {
@@ -914,6 +1125,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let editable = has_file && (st.kind == FileKind::Text || st.kind == FileKind::Markdown);
   let is_pdf = has_file && st.kind == FileKind::Pdf;
   let is_image = has_file && st.kind == FileKind::Image;
+  let is_audio = has_file && st.kind == FileKind::Audio;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -974,6 +1186,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
         ));
       }
     }
+  } else if is_audio {
+    widgets.status.set_text(&audio_status_text(&st));
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -989,6 +1203,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "pdf"
   } else if st.kind == FileKind::Image {
     "image"
+  } else if st.kind == FileKind::Audio {
+    "audio"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -1013,6 +1229,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Image {
     drop(st);
     refresh_image(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Audio {
+    drop(st);
+    refresh_audio(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -1278,6 +1499,180 @@ fn apply_image_fit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     }
   }
   apply_image_zoom(state, widgets);
+}
+
+/// Stop audio playback and drop the stream plus its timer tick. Called on
+/// file switch and window close so no audio survives the file or window.
+fn stop_audio(state: &Rc<RefCell<State>>) {
+  if let Some(tick) = state.borrow_mut().audio_tick.take() {
+    tick.remove();
+  }
+  if let Some(media) = state.borrow_mut().audio_media.take() {
+    media.pause();
+  }
+}
+
+/// Known playback duration in seconds: the live stream duration when the
+/// GStreamer pipeline reports one, otherwise the probed header duration.
+fn audio_known_duration(st: &State) -> Option<f64> {
+  if let Some(media) = st.audio_media.as_ref() {
+    let micros = media.duration();
+    if micros > 0 {
+      return Some(micros as f64 / 1_000_000.0);
+    }
+  }
+  st.audio_meta.as_ref().and_then(|meta| {
+    if meta.has_duration() {
+      meta.duration_secs
+    } else {
+      None
+    }
+  })
+}
+
+/// Status line for audio files: format, duration and size, or the probe
+/// reason when the file could not be probed.
+fn audio_status_text(st: &State) -> String {
+  match st.audio_meta.as_ref() {
+    Some(meta) => lang::t_with(
+      "status.audio",
+      &[
+        ("format", meta.format.as_str()),
+        (
+          "duration",
+          model::format_audio_time_opt(audio_known_duration(st)).as_str(),
+        ),
+        ("size", model::format_file_size(meta.file_bytes).as_str()),
+      ],
+    ),
+    None => {
+      let reason = st.audio_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+      lang::t_with("audio.load_failed", &[("reason", &reason)])
+    }
+  }
+}
+
+/// Build the audio page: file title, info line and controls, or the probe
+/// error hint. Broken files stay on the audio page and never fall through
+/// to the unsupported page.
+fn refresh_audio(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let (name, volume) = {
+    let st = state.borrow();
+    (
+      st.path.as_ref().map(|p| model::display_name(p)).unwrap_or_default(),
+      st.audio_volume,
+    )
+  };
+  widgets.audio_title.set_text(&name);
+  if state.borrow().audio_meta.is_none() {
+    let status = audio_status_text(&state.borrow());
+    let reason = state
+      .borrow()
+      .audio_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.audio_controls.set_visible(false);
+    widgets.audio_vol_row.set_visible(false);
+    widgets.audio_error_lbl.set_visible(true);
+    widgets.audio_error_lbl.set_text(&lang::t_with(
+      "audio.load_failed",
+      &[("reason", &reason)],
+    ));
+    widgets.audio_info.set_text(&status);
+    return;
+  }
+  widgets.audio_controls.set_visible(true);
+  widgets.audio_vol_row.set_visible(true);
+  widgets.audio_error_lbl.set_visible(false);
+  widgets.audio_vol.set_value(volume * 100.0);
+  widgets.audio_info.set_text(&audio_status_text(&state.borrow()));
+  update_audio_ui(state, widgets);
+  start_audio_tick(state, widgets);
+}
+
+/// Restart the 250 ms position timer for the current audio stream.
+fn start_audio_tick(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if let Some(tick) = state.borrow_mut().audio_tick.take() {
+    tick.remove();
+  }
+  let state_c = state.clone();
+  let widgets_c = widgets.clone();
+  let tick = glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+    update_audio_ui(&state_c, &widgets_c);
+    glib::ControlFlow::Continue
+  });
+  state.borrow_mut().audio_tick = Some(tick);
+}
+
+/// Refresh the player controls from the stream: play/pause label, seek
+/// position, elapsed/total time, info plus status line. Stream errors
+/// (e.g. a missing GStreamer decoder) surface as an honest hint; nothing
+/// here can crash on corrupt files.
+fn update_audio_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let snapshot = {
+    let st = state.borrow();
+    st.audio_media.clone().map(|media| {
+      let error = media.error().map(|err| err.to_string());
+      let position_us = media.timestamp();
+      (
+        media,
+        error,
+        position_us,
+        audio_known_duration(&st),
+      )
+    })
+  };
+  let Some((media, error, position_us, known)) = snapshot else {
+    return;
+  };
+  if media.is_ended() {
+    media.pause();
+    media.seek(0);
+  }
+  let playing = media.is_playing();
+  widgets.audio_play_btn.set_label(&lang::t(if playing {
+    "audio.pause"
+  } else {
+    "audio.play"
+  }));
+  if let Some(reason) = error {
+    widgets.audio_error_lbl.set_visible(true);
+    widgets.audio_error_lbl.set_text(&lang::t_with(
+      "audio.load_failed",
+      &[("reason", &reason)],
+    ));
+  } else {
+    widgets.audio_error_lbl.set_visible(false);
+  }
+  let position = (position_us.max(0) as f64) / 1_000_000.0;
+  match known {
+    Some(duration) if duration > 0.0 => {
+      let clamped = model::clamp_audio_seek(position, duration);
+      widgets.audio_seek.set_value(clamped / duration * 1000.0);
+      widgets.audio_seek.set_sensitive(media.is_seekable());
+      widgets.audio_time.set_text(&lang::t_with(
+        "audio.position",
+        &[
+          ("elapsed", model::format_audio_time(clamped).as_str()),
+          ("total", model::format_audio_time(duration).as_str()),
+        ],
+      ));
+    }
+    _ => {
+      widgets.audio_seek.set_value(0.0);
+      widgets.audio_seek.set_sensitive(false);
+      widgets.audio_time.set_text(&lang::t_with(
+        "audio.position",
+        &[
+          ("elapsed", model::format_audio_time(position).as_str()),
+          ("total", "--:--"),
+        ],
+      ));
+    }
+  }
+  let status = audio_status_text(&state.borrow());
+  widgets.audio_info.set_text(&status);
+  widgets.status.set_text(&status);
 }
 
 fn update_gutter(widgets: &Widgets) {

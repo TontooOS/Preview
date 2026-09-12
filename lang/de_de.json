@@ -36,5 +36,11 @@
   "image.load_failed": "Dieses Bild kann nicht geöffnet werden: %reason%",
   "image.downscaled": "für die Anzeige verkleinert",
   "status.image": "%width% x %height%, %size%, schreibgeschützt",
-  "status.image_unknown": "%size%, schreibgeschützt"
+  "status.image_unknown": "%size%, schreibgeschützt",
+  "audio.play": "Abspielen",
+  "audio.pause": "Pause",
+  "audio.volume": "Lautstärke",
+  "audio.position": "%elapsed% / %total%",
+  "audio.load_failed": "Diese Audiodatei kann nicht abgespielt werden: %reason%",
+  "status.audio": "%format%, %duration%, %size%, schreibgeschützt"
 }

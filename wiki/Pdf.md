@@ -182,3 +182,4 @@ let first = doc.page_text(0)?;
 - [RULE.md](RULE.md) – wiki design system
 - [Preview.md](Preview.md) – text viewer, Markdown preview/edit and manual save
 - [Image.md](Image.md) – read-only picture viewer
+- [Audio.md](Audio.md) – read-only audio player

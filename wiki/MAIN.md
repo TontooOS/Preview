@@ -21,6 +21,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Preview | [Preview.md](Preview.md) | Text viewer, Markdown preview/edit, manual save and localization |
 | Pdf | [Pdf.md](Pdf.md) | Read-only PDF page viewer with navigation, zoom and fit width |
 | Image | [Image.md](Image.md) | Read-only picture viewer with zoom and fit window |
+| Audio | [Audio.md](Audio.md) | Read-only audio player with play/pause, seek, volume and file info |
 
 ## Quick Start
 
@@ -55,3 +56,10 @@ See [Preview.md](Preview.md) for details.
   magic-byte sniffing, SVG via GTK/librsvg, dimensions plus file size in
   the status line, corrupt/missing hints, `image.*`, `status.image` and
   `status.image_unknown` keys in `lang/en_us.json` and `lang/de_de.json`).
+- 2026-09-12: Audio support (read-only player with `gtk::MediaFile`,
+  play/pause, seek slider with elapsed/total time, volume slider, format
+  plus header duration plus file size in the status line, magic-byte
+  sniffing, playback cleanup on file switch and window close,
+  corrupt/missing/decoder hints, `audio.*` and `status.audio` keys in
+  `lang/en_us.json` and `lang/de_de.json`; needs GStreamer codec plugins
+  on the system, see `wiki/Audio.md`).

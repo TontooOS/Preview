@@ -36,5 +36,11 @@
   "image.load_failed": "Cannot open this image: %reason%",
   "image.downscaled": "downscaled for display",
   "status.image": "%width% x %height%, %size%, read-only",
-  "status.image_unknown": "%size%, read-only"
+  "status.image_unknown": "%size%, read-only",
+  "audio.play": "Play",
+  "audio.pause": "Pause",
+  "audio.volume": "Volume",
+  "audio.position": "%elapsed% / %total%",
+  "audio.load_failed": "Cannot play this audio file: %reason%",
+  "status.audio": "%format%, %duration%, %size%, read-only"
 }

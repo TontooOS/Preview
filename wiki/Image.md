@@ -257,3 +257,4 @@ let zoomed = model::zoomed_size(meta.display_width, meta.display_height, 2.0);
 - [RULE.md](RULE.md) – wiki design system
 - [Preview.md](Preview.md) – text viewer, Markdown preview/edit and manual save
 - [Pdf.md](Pdf.md) – read-only PDF page viewer
+- [Audio.md](Audio.md) – read-only audio player
