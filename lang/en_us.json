@@ -42,5 +42,12 @@
   "audio.volume": "Volume",
   "audio.position": "%elapsed% / %total%",
   "audio.load_failed": "Cannot play this audio file: %reason%",
-  "status.audio": "%format%, %duration%, %size%, read-only"
+  "status.audio": "%format%, %duration%, %size%, read-only",
+  "video.play": "Play",
+  "video.pause": "Pause",
+  "video.volume": "Volume",
+  "video.position": "%elapsed% / %total%",
+  "video.load_failed": "Cannot play this video file: %reason%",
+  "video.audio_only": "This file has audio but no video track",
+  "status.video": "%format%, %resolution%%duration%, %size%, read-only"
 }

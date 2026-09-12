@@ -257,3 +257,4 @@ let seek = model::clamp_audio_seek(90.0, meta.duration_secs.unwrap_or(0.0));
 - [Preview.md](Preview.md) – text viewer, Markdown preview/edit and manual save
 - [Pdf.md](Pdf.md) – read-only PDF page viewer
 - [Image.md](Image.md) – read-only picture viewer
+- [Video.md](Video.md) – read-only video player

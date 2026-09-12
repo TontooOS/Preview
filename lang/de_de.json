@@ -42,5 +42,12 @@
   "audio.volume": "Lautstärke",
   "audio.position": "%elapsed% / %total%",
   "audio.load_failed": "Diese Audiodatei kann nicht abgespielt werden: %reason%",
-  "status.audio": "%format%, %duration%, %size%, schreibgeschützt"
+  "status.audio": "%format%, %duration%, %size%, schreibgeschützt",
+  "video.play": "Abspielen",
+  "video.pause": "Pause",
+  "video.volume": "Lautstärke",
+  "video.position": "%elapsed% / %total%",
+  "video.load_failed": "Diese Videodatei kann nicht abgespielt werden: %reason%",
+  "video.audio_only": "Diese Datei enthält Audio, aber keine Videospur",
+  "status.video": "%format%, %resolution%%duration%, %size%, schreibgeschützt"
 }

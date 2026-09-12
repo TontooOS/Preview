@@ -8,7 +8,9 @@
 //! open read-only as actual pictures (`gtk::Picture` with zoom in/out
 //! plus fit window). Audio files open read-only in a compact player
 //! (`gtk::MediaFile` with play/pause, seek slider, volume plus file
-//! info). Saving is manual only (`Save` button, `Ctrl+S`,
+//! info). Video files open read-only on a player page with a picture
+//! (`gtk::Video` driven by `gtk::MediaFile` with play/pause, seek slider,
+//! volume plus file info). Saving is manual only (`Save` button, `Ctrl+S`,
 //! close dialog with Cancel / Save / Don't Save).
 
 use crate::lang;
@@ -49,6 +51,11 @@ struct State {
   audio_media: Option<gtk::MediaFile>,
   audio_tick: Option<glib::SourceId>,
   audio_volume: f64,
+  video_meta: Option<model::VideoMeta>,
+  video_error: Option<String>,
+  video_media: Option<gtk::MediaFile>,
+  video_tick: Option<glib::SourceId>,
+  video_volume: f64,
 }
 
 impl State {
@@ -74,6 +81,11 @@ impl State {
       audio_media: None,
       audio_tick: None,
       audio_volume: 1.0,
+      video_meta: None,
+      video_error: None,
+      video_media: None,
+      video_tick: None,
+      video_volume: 1.0,
     }
   }
 }
@@ -124,6 +136,16 @@ struct Widgets {
   audio_vol_row: gtk::Box,
   audio_error_lbl: gtk::Label,
   audio_controls: gtk::Box,
+  video: gtk::Video,
+  video_play_btn: gtk::Button,
+  video_seek: gtk::Scale,
+  video_time: gtk::Label,
+  video_title: gtk::Label,
+  video_info: gtk::Label,
+  video_vol: gtk::Scale,
+  video_vol_row: gtk::Box,
+  video_error_lbl: gtk::Label,
+  video_controls: gtk::Box,
   root: gtk::Box,
 }
 
@@ -440,6 +462,69 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   audio_box.append(&audio_error_lbl);
   stack.add_named(&audio_box, Some("audio"));
 
+  // Video page: picture (`gtk::Video` driven by a `gtk::MediaFile`) plus
+  // title, file info, play/pause with a seek slider and elapsed/total
+  // time, a volume slider and an error hint. Playback is GStreamer-backed;
+  // files without a decoder show an honest hint with the stream error
+  // instead of crashing.
+  let video_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+  video_box.set_hexpand(true);
+  video_box.set_vexpand(true);
+  video_box.set_margin_start(16);
+  video_box.set_margin_end(16);
+  video_box.set_margin_top(8);
+  video_box.set_margin_bottom(8);
+  let video = gtk::Video::new();
+  video.set_autoplay(false);
+  video.set_hexpand(true);
+  video.set_vexpand(true);
+  video.set_size_request(640, 360);
+  video_box.append(&video);
+  let video_title = gtk::Label::new(Some(""));
+  video_title.add_css_class("video-title");
+  let video_info = gtk::Label::new(Some(""));
+  video_info.add_css_class("dim-label");
+  video_info.set_wrap(true);
+  video_info.set_justify(gtk::Justification::Center);
+  video_box.append(&video_title);
+  video_box.append(&video_info);
+  let video_controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+  video_controls.set_halign(gtk::Align::Center);
+  video_controls.set_hexpand(true);
+  let video_play_btn = gtk::Button::with_label(&lang::t("video.play"));
+  video_play_btn.add_css_class("suggested-action");
+  let video_seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1000.0, 1.0);
+  video_seek.set_draw_value(false);
+  video_seek.set_hexpand(true);
+  video_seek.set_size_request(360, -1);
+  let video_time = gtk::Label::new(Some(&lang::t_with(
+    "video.position",
+    &[("elapsed", "0:00"), ("total", "--:--")],
+  )));
+  video_time.add_css_class("video-time");
+  video_time.add_css_class("dim-label");
+  video_controls.append(&video_play_btn);
+  video_controls.append(&video_seek);
+  video_controls.append(&video_time);
+  video_box.append(&video_controls);
+  let video_vol_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  video_vol_row.set_halign(gtk::Align::Center);
+  let video_vol_label = gtk::Label::new(Some(&lang::t("video.volume")));
+  video_vol_label.add_css_class("dim-label");
+  let video_vol = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+  video_vol.set_draw_value(false);
+  video_vol.set_size_request(160, -1);
+  video_vol.set_value(100.0);
+  video_vol_row.append(&video_vol_label);
+  video_vol_row.append(&video_vol);
+  video_box.append(&video_vol_row);
+  let video_error_lbl = gtk::Label::new(Some(""));
+  video_error_lbl.add_css_class("dim-label");
+  video_error_lbl.set_wrap(true);
+  video_error_lbl.set_justify(gtk::Justification::Center);
+  video_box.append(&video_error_lbl);
+  stack.add_named(&video_box, Some("video"));
+
   root.append(&stack);
 
   // Status line.
@@ -509,6 +594,16 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     audio_vol_row: audio_vol_row.clone(),
     audio_error_lbl: audio_error_lbl.clone(),
     audio_controls: audio_controls.clone(),
+    video: video.clone(),
+    video_play_btn: video_play_btn.clone(),
+    video_seek: video_seek.clone(),
+    video_time: video_time.clone(),
+    video_title: video_title.clone(),
+    video_info: video_info.clone(),
+    video_vol: video_vol.clone(),
+    video_vol_row: video_vol_row.clone(),
+    video_error_lbl: video_error_lbl.clone(),
+    video_controls: video_controls.clone(),
     root: root.clone(),
   });
 
@@ -559,9 +654,10 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
       let widgets = widgets.clone();
       let force = force.clone();
       window.connect_close_request(move |win| {
-        // Never let audio survive the window, even with unsaved changes
-        // pending in another file (audio itself is never dirty).
+        // Never let audio or video survive the window, even with unsaved
+        // changes pending in another file (media itself is never dirty).
         stop_audio(&state);
+        stop_video(&state, &widgets);
         if force.get() || !state.borrow().dirty {
           return false.into();
         }
@@ -778,12 +874,60 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
       glib::Propagation::Proceed
     });
   }
-  // Stop playback when the window is torn down (the close-request handler
-  // below also stops it so no audio survives the window).
+  // Video player: same control pattern as audio (play/pause toggle, seek
+  // slider in permille, volume slider in percent). The seek scale only
+  // handles user drags (`change-value`); the timer tick sets the position
+  // programmatically, so no feedback loop needs guarding.
   {
     let state = state.clone();
+    let widgets = widgets.clone();
+    video_play_btn.connect_clicked(move |_| {
+      let media = state.borrow().video_media.clone();
+      if let Some(media) = media.as_ref() {
+        if media.is_playing() {
+          media.pause();
+        } else {
+          media.play();
+        }
+      }
+      update_video_ui(&state, &widgets);
+    });
+  }
+  {
+    let state = state.clone();
+    video_seek.connect_change_value(move |_, _, value| {
+      let (media, duration) = {
+        let st = state.borrow();
+        (st.video_media.clone(), video_known_duration(&st))
+      };
+      if let (Some(media), Some(duration)) = (media.as_ref(), duration) {
+        if media.is_seekable() && duration > 0.0 {
+          let target = model::clamp_audio_seek(value / 1000.0 * duration, duration);
+          media.seek((target * 1_000_000.0) as i64);
+        }
+      }
+      glib::Propagation::Proceed
+    });
+  }
+  {
+    let state = state.clone();
+    video_vol.connect_change_value(move |_, _, value| {
+      let volume = (value / 100.0).clamp(0.0, 1.0);
+      state.borrow_mut().video_volume = volume;
+      if let Some(media) = state.borrow().video_media.clone() {
+        media.set_volume(volume);
+      }
+      glib::Propagation::Proceed
+    });
+  }
+  // Stop playback when the window is torn down (the close-request handler
+  // below also stops it so no audio or video survives the window).
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
     root.connect_unrealize(move |_| {
       stop_audio(&state);
+      stop_video(&state, &widgets);
     });
   }
 
@@ -805,7 +949,9 @@ fn base_css() -> String {
      .title-1 {{ font-family: '{SF_PRO}'; font-size: 22pt; font-weight: 800; }}\
      .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .audio-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
-     .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}"
+     .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
+     .video-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}"
   )
 }
 
@@ -884,10 +1030,11 @@ fn confirm_discard(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, proceed: R
 
 /// Load a path into the state and refresh the UI.
 fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) {
-  // Switching files always stops audio playback first.
+  // Switching files always stops media playback first.
   stop_audio(state);
-  // Extension first, image and audio magic bytes second so misnamed files
-  // still land on the picture viewer or the player instead of the
+  stop_video(state, widgets);
+  // Extension first, image/audio/video magic bytes second so misnamed
+  // files still land on the picture viewer or a player instead of the
   // unsupported page.
   let kind = model::classify_file(path);
   if kind == FileKind::Pdf {
@@ -906,6 +1053,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_base = None;
         st.audio_meta = None;
         st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -924,6 +1073,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_base = None;
         st.audio_meta = None;
         st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = Some(reason);
@@ -947,6 +1098,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_base = None;
         st.audio_meta = None;
         st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
         st.img_zoom = 1.0;
         st.img_fit = true;
         st.dirty = false;
@@ -968,6 +1121,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_base = None;
         st.audio_meta = None;
         st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -989,6 +1144,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
     st.img_base = None;
     st.audio_meta = None;
     st.audio_error = None;
+    st.video_meta = None;
+    st.video_error = None;
     st.dirty = false;
     st.mode = Mode::Preview;
     st.error = None;
@@ -1014,6 +1171,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.audio_meta = Some(meta);
         st.audio_error = None;
         st.audio_media = Some(media);
+        st.video_meta = None;
+        st.video_error = None;
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -1032,6 +1191,57 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
         st.img_base = None;
         st.audio_meta = None;
         st.audio_error = Some(reason);
+        st.video_meta = None;
+        st.video_error = None;
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+    }
+    return;
+  }
+  if kind == FileKind::Video {
+    match model::probe_video(path) {
+      Ok(meta) => {
+        let volume = state.borrow().video_volume;
+        let media = gtk::MediaFile::for_file(&gtk::gio::File::for_path(path));
+        media.set_volume(volume);
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = Some(meta);
+        st.video_error = None;
+        st.video_media = Some(media);
+        st.dirty = false;
+        st.mode = Mode::Preview;
+        st.error = None;
+        drop(st);
+        refresh_chrome(state, widgets);
+        refresh_body(state, widgets);
+      }
+      Err(reason) => {
+        let mut st = state.borrow_mut();
+        st.path = Some(path.clone());
+        st.kind = kind;
+        st.content.clear();
+        st.pdf = None;
+        st.img_meta = None;
+        st.img_error = None;
+        st.img_base = None;
+        st.audio_meta = None;
+        st.audio_error = None;
+        st.video_meta = None;
+        st.video_error = Some(reason);
         st.dirty = false;
         st.mode = Mode::Preview;
         st.error = None;
@@ -1054,6 +1264,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.img_base = None;
       st.audio_meta = None;
       st.audio_error = None;
+      st.video_meta = None;
+      st.video_error = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = None;
@@ -1072,6 +1284,8 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
       st.img_base = None;
       st.audio_meta = None;
       st.audio_error = None;
+      st.video_meta = None;
+      st.video_error = None;
       st.dirty = false;
       st.mode = Mode::Preview;
       st.error = Some(reason);
@@ -1083,11 +1297,12 @@ fn open_path(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, path: &PathBuf) 
 }
 
 /// Persist the edit buffer back to disk (manual save only, never for PDFs,
-/// images or audio files).
+/// images, audio or video files).
 fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if state.borrow().kind == FileKind::Pdf
     || state.borrow().kind == FileKind::Image
     || state.borrow().kind == FileKind::Audio
+    || state.borrow().kind == FileKind::Video
   {
     return;
   }
@@ -1126,6 +1341,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let is_pdf = has_file && st.kind == FileKind::Pdf;
   let is_image = has_file && st.kind == FileKind::Image;
   let is_audio = has_file && st.kind == FileKind::Audio;
+  let is_video = has_file && st.kind == FileKind::Video;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -1188,6 +1404,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     }
   } else if is_audio {
     widgets.status.set_text(&audio_status_text(&st));
+  } else if is_video {
+    widgets.status.set_text(&video_status_text(&st));
   } else {
     let lines = st.content.lines().count().max(1);
     let key = if st.dirty { "status.dirty" } else { "status.saved" };
@@ -1205,6 +1423,8 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     "image"
   } else if st.kind == FileKind::Audio {
     "audio"
+  } else if st.kind == FileKind::Video {
+    "video"
   } else if st.kind == FileKind::Unsupported {
     "unsupported"
   } else {
@@ -1234,6 +1454,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if st.kind == FileKind::Audio {
     drop(st);
     refresh_audio(state, widgets);
+    return;
+  }
+  if st.kind == FileKind::Video {
+    drop(st);
+    refresh_video(state, widgets);
     return;
   }
   if st.kind == FileKind::Unsupported {
@@ -1672,6 +1897,199 @@ fn update_audio_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   }
   let status = audio_status_text(&state.borrow());
   widgets.audio_info.set_text(&status);
+  widgets.status.set_text(&status);
+}
+
+/// Stop video playback, drop the stream plus its timer tick and detach the
+/// picture so no frame (and no audio bed) survives the file or window.
+/// Called on file switch and window close.
+fn stop_video(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if let Some(tick) = state.borrow_mut().video_tick.take() {
+    tick.remove();
+  }
+  if let Some(media) = state.borrow_mut().video_media.take() {
+    media.pause();
+  }
+  widgets.video.set_media_stream(Option::<&gtk::MediaFile>::None);
+}
+
+/// Known playback duration in seconds: the live stream duration when the
+/// GStreamer pipeline reports one, otherwise the probed header duration.
+fn video_known_duration(st: &State) -> Option<f64> {
+  if let Some(media) = st.video_media.as_ref() {
+    let micros = media.duration();
+    if micros > 0 {
+      return Some(micros as f64 / 1_000_000.0);
+    }
+  }
+  st.video_meta.as_ref().and_then(|meta| {
+    if meta.has_duration() {
+      meta.duration_secs
+    } else {
+      None
+    }
+  })
+}
+
+/// Status line for video files: format, resolution when probed, duration
+/// and size, or the probe reason when the file could not be probed.
+fn video_status_text(st: &State) -> String {
+  match st.video_meta.as_ref() {
+    Some(meta) => {
+      let resolution = match meta.resolution {
+        Some((w, h)) if meta.has_resolution() => format!("{w} x {h}, "),
+        _ => String::new(),
+      };
+      lang::t_with(
+        "status.video",
+        &[
+          ("format", meta.format.as_str()),
+          ("resolution", resolution.as_str()),
+          (
+            "duration",
+            model::format_audio_time_opt(video_known_duration(st)).as_str(),
+          ),
+          ("size", model::format_file_size(meta.file_bytes).as_str()),
+        ],
+      )
+    }
+    None => {
+      let reason = st.video_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
+      lang::t_with("video.load_failed", &[("reason", &reason)])
+    }
+  }
+}
+
+/// Build the video page: picture plus title, info line and controls, or
+/// the probe error hint. Broken files stay on the video page and never
+/// fall through to the unsupported page.
+fn refresh_video(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let (name, volume, media) = {
+    let st = state.borrow();
+    (
+      st.path.as_ref().map(|p| model::display_name(p)).unwrap_or_default(),
+      st.video_volume,
+      st.video_media.clone(),
+    )
+  };
+  widgets.video_title.set_text(&name);
+  if state.borrow().video_meta.is_none() {
+    widgets.video.set_media_stream(Option::<&gtk::MediaFile>::None);
+    let status = video_status_text(&state.borrow());
+    let reason = state
+      .borrow()
+      .video_error
+      .clone()
+      .unwrap_or_else(|| lang::t("unsupported.hint"));
+    widgets.video_controls.set_visible(false);
+    widgets.video_vol_row.set_visible(false);
+    widgets.video_error_lbl.set_visible(true);
+    widgets.video_error_lbl.set_text(&lang::t_with(
+      "video.load_failed",
+      &[("reason", &reason)],
+    ));
+    widgets.video_info.set_text(&status);
+    return;
+  }
+  widgets.video_controls.set_visible(true);
+  widgets.video_vol_row.set_visible(true);
+  widgets.video_error_lbl.set_visible(false);
+  widgets.video_vol.set_value(volume * 100.0);
+  if let Some(media) = media.as_ref() {
+    widgets.video.set_media_stream(Some(media));
+  }
+  widgets.video_info.set_text(&video_status_text(&state.borrow()));
+  update_video_ui(state, widgets);
+  start_video_tick(state, widgets);
+}
+
+/// Restart the 250 ms position timer for the current video stream.
+fn start_video_tick(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if let Some(tick) = state.borrow_mut().video_tick.take() {
+    tick.remove();
+  }
+  let state_c = state.clone();
+  let widgets_c = widgets.clone();
+  let tick = glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+    update_video_ui(&state_c, &widgets_c);
+    glib::ControlFlow::Continue
+  });
+  state.borrow_mut().video_tick = Some(tick);
+}
+
+/// Refresh the player controls from the stream: picture keeps playing via
+/// `gtk::Video`, the play/pause label, seek position, elapsed/total time,
+/// info plus status line follow the stream. Stream errors (e.g. a missing
+/// GStreamer decoder) surface as an honest hint; a stream without a video
+/// track reports the audio-only hint; nothing here can crash on corrupt
+/// files.
+fn update_video_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let snapshot = {
+    let st = state.borrow();
+    st.video_media.clone().map(|media| {
+      let error = media.error().map(|err| err.to_string());
+      let position_us = media.timestamp();
+      (
+        media,
+        error,
+        position_us,
+        video_known_duration(&st),
+      )
+    })
+  };
+  let Some((media, error, position_us, known)) = snapshot else {
+    return;
+  };
+  if media.is_ended() {
+    media.pause();
+    media.seek(0);
+  }
+  let playing = media.is_playing();
+  widgets.video_play_btn.set_label(&lang::t(if playing {
+    "video.pause"
+  } else {
+    "video.play"
+  }));
+  if let Some(reason) = error {
+    widgets.video_error_lbl.set_visible(true);
+    widgets.video_error_lbl.set_text(&lang::t_with(
+      "video.load_failed",
+      &[("reason", &reason)],
+    ));
+  } else if media.duration() > 0 && !media.has_video() {
+    widgets.video_error_lbl.set_visible(true);
+    widgets.video_error_lbl.set_text(&lang::t("video.audio_only"));
+  } else {
+    widgets.video_error_lbl.set_visible(false);
+  }
+  let position = (position_us.max(0) as f64) / 1_000_000.0;
+  match known {
+    Some(duration) if duration > 0.0 => {
+      let clamped = model::clamp_audio_seek(position, duration);
+      widgets.video_seek.set_value(clamped / duration * 1000.0);
+      widgets.video_seek.set_sensitive(media.is_seekable());
+      widgets.video_time.set_text(&lang::t_with(
+        "video.position",
+        &[
+          ("elapsed", model::format_audio_time(clamped).as_str()),
+          ("total", model::format_audio_time(duration).as_str()),
+        ],
+      ));
+    }
+    _ => {
+      widgets.video_seek.set_value(0.0);
+      widgets.video_seek.set_sensitive(false);
+      widgets.video_time.set_text(&lang::t_with(
+        "video.position",
+        &[
+          ("elapsed", model::format_audio_time(position).as_str()),
+          ("total", "--:--"),
+        ],
+      ));
+    }
+  }
+  let status = video_status_text(&state.borrow());
+  widgets.video_info.set_text(&status);
   widgets.status.set_text(&status);
 }
 

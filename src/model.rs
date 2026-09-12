@@ -7,7 +7,10 @@
 //! formats are decoded with the pure-Rust `image` crate, SVG files are
 //! handed to GTK (librsvg). Audio files open read-only in a compact player
 //! (`gtk::MediaFile` backed by GStreamer): play/pause, seek, volume plus
-//! file info (format, duration, size). Anything else is rejected as
+//! file info (format, duration, size). Video files open read-only on a
+//! player page with a picture (`gtk::Video` driven by `gtk::MediaFile`):
+//! play/pause, seek, volume plus file info (format, resolution when cheap,
+//! duration, size). Anything else is rejected as
 //! unsupported with a hint (binary files are never loaded as text).
 
 use std::path::{Path, PathBuf};
@@ -25,7 +28,10 @@ pub enum FileKind {
   Image,
   /// Audio: read-only player (play/pause, seek, volume, file info).
   Audio,
-  /// Not supported yet (video, office, binary).
+  /// Video: read-only player with a picture (play/pause, seek, volume,
+  /// file info with resolution when cheap).
+  Video,
+  /// Not supported yet (office, binary).
   Unsupported,
 }
 
@@ -58,6 +64,14 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
   "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "aiff", "aif",
 ];
 
+/// Video files open in the read-only player page (see `wiki/Video.md`).
+/// `m4v` is the MP4 video sibling of `m4a` audio, `ogv` is the Ogg video
+/// extension alongside `ogg`/`oga` audio, `mpg`/`mpeg` cover MPEG program
+/// streams.
+pub const VIDEO_EXTENSIONS: &[&str] = &[
+  "mp4", "m4v", "mkv", "webm", "mov", "avi", "ogv", "flv", "wmv", "mpg", "mpeg", "3gp",
+];
+
 /// Max file size loaded as text in the basis version (8 MiB).
 pub const MAX_TEXT_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -80,6 +94,9 @@ pub fn classify(path: &Path) -> FileKind {
   if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Audio;
   }
+  if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+    return FileKind::Video;
+  }
   if TEXT_EXTENSIONS.contains(&ext.as_str()) {
     return FileKind::Text;
   }
@@ -94,11 +111,14 @@ pub fn classify(path: &Path) -> FileKind {
 /// Classify with a magic-byte fallback so misnamed files still open on the
 /// right page: when the extension does not say image but the file header
 /// carries known image magic, the file is treated as an image; when the
-/// header carries known audio magic, the file is treated as audio. Other
-/// kinds are never changed by sniffing.
+/// header carries known audio magic, the file is treated as audio; when it
+/// carries known video magic, it is treated as video. Other kinds are never
+/// changed by sniffing. Audio sniffing wins over video sniffing for shared
+/// containers (Ogg, ASF) since their headers cannot name the stream type
+/// cheaply; the `.ogv` and `.wmv` extensions still route to video first.
 pub fn classify_file(path: &Path) -> FileKind {
   let by_ext = classify(path);
-  if by_ext == FileKind::Image || by_ext == FileKind::Audio {
+  if by_ext == FileKind::Image || by_ext == FileKind::Audio || by_ext == FileKind::Video {
     return by_ext;
   }
   let Ok(bytes) = read_prefix(path, 4096) else {
@@ -109,6 +129,9 @@ pub fn classify_file(path: &Path) -> FileKind {
   }
   if sniff_audio(&bytes) {
     return FileKind::Audio;
+  }
+  if sniff_video(&bytes) {
+    return FileKind::Video;
   }
   by_ext
 }
@@ -283,6 +306,91 @@ fn is_asf_magic(bytes: &[u8]) -> bool {
   ])
 }
 
+/// Returns true when the bytes carry a known video container magic number
+/// (see `wiki/Video.md` for the format table). ASF bytes are excluded on
+/// purpose: they also match WMA audio, and audio sniffing wins for shared
+/// containers (`.wmv` still routes to video via its extension). Image
+/// (`avif`/`heic`) and audio (`M4A `) ISO brands are excluded so still
+/// images and audio never sniff as video.
+pub fn sniff_video(bytes: &[u8]) -> bool {
+  is_video_ftyp(bytes)
+    || is_ebml_magic(bytes)
+    || is_avi_magic(bytes)
+    || is_theora_ogg(bytes)
+    || is_flv_magic(bytes)
+    || is_mpeg_ps_magic(bytes)
+}
+
+/// ISO base media (`ftyp`) with a video brand: MP4 (`isom`, `iso2`,
+/// `mp41`, `mp42`, `avc1`), `M4V `, QuickTime (`qt  `) and 3GP (`3gp4`,
+/// `3gp5`, `3g2a`, ...). Matched case-sensitively on the 4-byte major
+/// brand; `3gp`/`3g2` match on their 3-byte prefix.
+fn is_video_ftyp(bytes: &[u8]) -> bool {
+  if bytes.len() < 12 || &bytes[4..8] != b"ftyp" {
+    return false;
+  }
+  let brand = &bytes[8..12];
+  matches!(
+    brand,
+    b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"m4v " | b"qt  "
+  ) || brand.starts_with(b"3gp")
+    || brand.starts_with(b"3g2")
+}
+
+/// EBML header (`1A 45 DF A3`) used by Matroska (`.mkv`) and WebM.
+fn is_ebml_magic(bytes: &[u8]) -> bool {
+  bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
+}
+
+/// RIFF with the `AVI ` form type (distinct from `WAVE` audio and `WEBP`
+/// images).
+fn is_avi_magic(bytes: &[u8]) -> bool {
+  bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
+}
+
+/// Ogg container whose first packet is a Theora video header (`0x80` plus
+/// `theora`). Plain Vorbis/Opus audio packets never match, so audio files
+/// keep sniffing as audio.
+fn is_theora_ogg(bytes: &[u8]) -> bool {
+  if !is_ogg_magic(bytes) || bytes.len() < 27 + 1 {
+    return false;
+  }
+  let segments = bytes[26] as usize;
+  if bytes.len() < 27 + segments {
+    return false;
+  }
+  let mut packet: Vec<u8> = Vec::new();
+  let mut offset = 27 + segments;
+  for i in 0..segments {
+    let seg_len = bytes[27 + i] as usize;
+    let chunk = match bytes.get(offset..offset + seg_len) {
+      Some(chunk) => chunk,
+      None => return false,
+    };
+    packet.extend_from_slice(chunk);
+    offset += seg_len;
+    if seg_len < 255 {
+      break;
+    }
+  }
+  packet.len() >= 7 && packet[0] == 0x80 && &packet[1..7] == b"theora"
+}
+
+/// FLV signature (`FLV` plus version byte `0x01`).
+fn is_flv_magic(bytes: &[u8]) -> bool {
+  bytes.len() >= 4 && &bytes[..3] == b"FLV" && bytes[3] == 0x01
+}
+
+/// MPEG program/elementary stream start: pack header (`00 00 01 BA`) or
+/// sequence header (`00 00 01 B3`).
+fn is_mpeg_ps_magic(bytes: &[u8]) -> bool {
+  bytes.len() >= 4
+    && bytes[0] == 0x00
+    && bytes[1] == 0x00
+    && bytes[2] == 0x01
+    && (bytes[3] == 0xBA || bytes[3] == 0xB3)
+}
+
 /// Short display label for an audio extension (lowercase, without dot).
 /// Unknown extensions report `Audio` so sniffed files still get a label.
 pub fn audio_format_label(ext: &str) -> &'static str {
@@ -298,6 +406,116 @@ pub fn audio_format_label(ext: &str) -> &'static str {
     "aiff" | "aif" => "AIFF",
     _ => "Audio",
   }
+}
+
+/// Short display label for a video extension (lowercase, without dot).
+/// Unknown extensions report `Video` so sniffed files still get a label.
+pub fn video_format_label(ext: &str) -> &'static str {
+  match ext {
+    "mp4" => "MP4",
+    "m4v" => "M4V",
+    "mkv" => "MKV",
+    "webm" => "WebM",
+    "mov" => "MOV",
+    "avi" => "AVI",
+    "ogv" => "Ogg",
+    "flv" => "FLV",
+    "wmv" => "WMV",
+    "mpg" | "mpeg" => "MPEG",
+    "3gp" => "3GP",
+    _ => "Video",
+  }
+}
+
+/// Read-only video metadata probed without decoding: stat plus duration
+/// and resolution parsed from the file header where cheap (ISO base media
+/// only). Decoding is left to the GStreamer-backed player, which also
+/// reports the exact duration at runtime when a decoder is installed.
+#[derive(Clone, Debug)]
+pub struct VideoMeta {
+  /// Short format label (`MP4`, `MKV`, ...).
+  pub format: String,
+  /// Duration in seconds when the header parse succeeded.
+  pub duration_secs: Option<f64>,
+  /// Display resolution in pixels when the header parse succeeded.
+  pub resolution: Option<(u32, u32)>,
+  /// File size in bytes.
+  pub file_bytes: u64,
+}
+
+impl VideoMeta {
+  /// True when a header duration is known.
+  pub fn has_duration(&self) -> bool {
+    self.duration_secs.is_some_and(|d| d.is_finite() && d > 0.0)
+  }
+
+  /// True when header resolution is known.
+  pub fn has_resolution(&self) -> bool {
+    self.resolution.is_some_and(|(w, h)| w > 0 && h > 0)
+  }
+}
+
+/// Probe a video file: stat plus a best-effort header duration and
+/// resolution. Returns a human-readable reason for missing files,
+/// directories and empty files. Files whose header cannot be parsed still
+/// probe fine (duration and resolution are `None`); the player shows the
+/// runtime duration once the stream is prepared instead.
+pub fn probe_video(path: &Path) -> Result<VideoMeta, String> {
+  let meta = std::fs::metadata(path).map_err(|e| format!("cannot stat file: {e}"))?;
+  if meta.is_dir() {
+    return Err("path is a directory".to_string());
+  }
+  if meta.len() == 0 {
+    return Err("file is empty".to_string());
+  }
+  let ext = path
+    .extension()
+    .and_then(|e| e.to_str())
+    .map(|e| e.to_lowercase())
+    .unwrap_or_default();
+  let prefix = read_prefix(path, 65536).map_err(|e| format!("cannot read file: {e}"))?;
+  let (duration_secs, resolution) = probe_video_header(&prefix);
+  Ok(VideoMeta {
+    format: video_format_label(&ext).to_string(),
+    duration_secs,
+    resolution,
+    file_bytes: meta.len(),
+  })
+}
+
+/// Duration and resolution from an ISO base media header (`ftyp` +
+/// `moov/mvhd` plus the first `trak/tkhd` width/height). Returns
+/// `(None, None)` for other containers; their duration comes from the
+/// live stream at runtime.
+fn probe_video_header(prefix: &[u8]) -> (Option<f64>, Option<(u32, u32)>) {
+  if prefix.len() < 12 || &prefix[4..8] != b"ftyp" {
+    return (None, None);
+  }
+  (m4a_duration(prefix), mp4_resolution(prefix))
+}
+
+/// Resolution from the first `moov/trak/tkhd` box: width and height are
+/// stored as 16.16 fixed-point values. Returns `None` for truncated
+/// headers or zero sizes.
+pub fn mp4_resolution(bytes: &[u8]) -> Option<(u32, u32)> {
+  let (moov_start, moov_end) = find_box(bytes, 0, bytes.len(), b"moov")?;
+  let (trak_start, trak_end) = find_box(bytes, moov_start, moov_end, b"trak")?;
+  let (tkhd_start, tkhd_end) = find_box(bytes, trak_start, trak_end, b"tkhd")?;
+  let body = &bytes[tkhd_start..tkhd_end];
+  if body.len() < 84 {
+    return None;
+  }
+  // Version byte selects the field offsets (v0: 76/80, v1: 88/92).
+  let (w_off, h_off) = if body[0] == 1 { (88, 92) } else { (76, 80) };
+  if body.len() < h_off + 4 {
+    return None;
+  }
+  let width = u32::from_be_bytes(body[w_off..w_off + 4].try_into().ok()?) >> 16;
+  let height = u32::from_be_bytes(body[h_off..h_off + 4].try_into().ok()?) >> 16;
+  if width == 0 || height == 0 {
+    return None;
+  }
+  Some((width, height))
 }
 
 /// Read-only audio metadata probed without decoding: stat plus duration
@@ -1158,7 +1376,232 @@ mod tests {
   #[test]
   fn unsupported_classified() {
     assert_eq!(classify(Path::new("sheet.xlsx")), FileKind::Unsupported);
-    assert_eq!(classify(Path::new("movie.mp4")), FileKind::Unsupported);
+    assert_eq!(classify(Path::new("slides.pptx")), FileKind::Unsupported);
+    assert_eq!(classify(Path::new("doc.docx")), FileKind::Unsupported);
+  }
+
+  #[test]
+  fn video_extensions_classified() {
+    for name in [
+      "movie.mp4",
+      "movie.MP4",
+      "clip.m4v",
+      "film.mkv",
+      "film.MKV",
+      "stream.webm",
+      "stream.WEBM",
+      "capture.mov",
+      "capture.MOV",
+      "old.avi",
+      "old.AVI",
+      "clip.ogv",
+      "flash.flv",
+      "legacy.wmv",
+      "tape.mpg",
+      "tape.mpeg",
+      "tape.MPEG",
+      "phone.3gp",
+      "phone.3GP",
+    ] {
+      assert_eq!(classify(Path::new(name)), FileKind::Video, "failed for {name}");
+    }
+  }
+
+  #[test]
+  fn video_magic_sniffed() {
+    assert!(sniff_video(b"\x00\x00\x00\x20ftypisom\x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftypmp42\x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftypavc1\x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftypM4V \x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftypqt  \x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftyp3gp5\x00"));
+    assert!(sniff_video(b"\x00\x00\x00\x20ftyp3g2a\x00"));
+    assert!(sniff_video(&[0x1A, 0x45, 0xDF, 0xA3, 0x93, 0x42])); // EBML mkv/webm
+    assert!(sniff_video(b"RIFF\x24\x00\x00\x00AVI "));
+    assert!(sniff_video(b"FLV\x01\x05\x00\x00\x00"));
+    assert!(sniff_video(&[0x00, 0x00, 0x01, 0xBA, 0x21])); // MPEG pack
+    assert!(sniff_video(&[0x00, 0x00, 0x01, 0xB3, 0x2C])); // MPEG sequence
+    // Ogg Theora video header in the first packet.
+    let mut theora = Vec::from(b"OggS".as_slice());
+    theora.extend_from_slice(&[0, 0x02]); // version + header type
+    theora.extend_from_slice(&0u64.to_le_bytes()); // granule
+    theora.extend_from_slice(&1u32.to_le_bytes()); // serial
+    theora.extend_from_slice(&0u32.to_le_bytes()); // sequence
+    theora.extend_from_slice(&0u32.to_le_bytes()); // crc
+    theora.push(1); // one segment
+    theora.push(7); // length 7
+    theora.push(0x80);
+    theora.extend_from_slice(b"theora");
+    assert!(sniff_video(&theora));
+    // Never video: shared or neighboring containers and formats.
+    assert!(!sniff_video(b"\x00\x00\x00\x20ftypM4A \x00")); // audio brand
+    assert!(!sniff_video(b"\x00\x00\x00\x20ftypavif\x00")); // still image
+    assert!(!sniff_video(b"\x00\x00\x00\x20ftypheic\x00")); // still image
+    assert!(!sniff_video(b"ID3\x04\x00\x00\x00\x00\x00\x00")); // audio tag
+    assert!(!sniff_video(b"RIFF\x24\x00\x00\x00WAVE")); // audio
+    assert!(!sniff_video(b"RIFF\x00\x00\x00\x00WEBP")); // image
+    assert!(!sniff_video(b"OggS\x00\x02\x00\x00")); // bare Ogg, no packet
+    assert!(!sniff_video(b"fLaC\x10\x00\x00"));
+    assert!(!sniff_video(b"FLV\x04")); // wrong version byte
+    assert!(!sniff_video(b"hello world"));
+    assert!(!sniff_video(b"%PDF-1.4"));
+    assert!(!sniff_video(b""));
+  }
+
+  #[test]
+  fn misnamed_video_sniffed_as_video() {
+    let dir = std::env::temp_dir().join("preview-video-test");
+    let _ = std::fs::create_dir_all(&dir);
+    // EBML magic without any extension still opens as video.
+    let no_ext = dir.join("misnamed-no-ext-video");
+    std::fs::write(&no_ext, [0x1A, 0x45, 0xDF, 0xA3, 0x93, 0x42, 0x82]).expect("write ebml magic");
+    assert_eq!(classify_file(&no_ext), FileKind::Video);
+    // MP4 magic behind a `.bin` extension still opens as video.
+    let bin_ext = dir.join("misnamed-video.bin");
+    std::fs::write(&bin_ext, b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00").expect("write ftyp");
+    assert_eq!(classify_file(&bin_ext), FileKind::Video);
+    // Audio keeps precedence for shared Ogg bytes (see `sniff_audio`).
+    let ogg_ext = dir.join("shared.bin");
+    std::fs::write(&ogg_ext, b"OggS\x00\x02\x00\x00").expect("write ogg magic");
+    assert_eq!(classify_file(&ogg_ext), FileKind::Audio);
+    let _ = std::fs::remove_file(&no_ext);
+    let _ = std::fs::remove_file(&bin_ext);
+    let _ = std::fs::remove_file(&ogg_ext);
+  }
+
+  #[test]
+  fn video_format_labels() {
+    assert_eq!(video_format_label("mp4"), "MP4");
+    assert_eq!(video_format_label("m4v"), "M4V");
+    assert_eq!(video_format_label("mkv"), "MKV");
+    assert_eq!(video_format_label("webm"), "WebM");
+    assert_eq!(video_format_label("mov"), "MOV");
+    assert_eq!(video_format_label("avi"), "AVI");
+    assert_eq!(video_format_label("ogv"), "Ogg");
+    assert_eq!(video_format_label("flv"), "FLV");
+    assert_eq!(video_format_label("wmv"), "WMV");
+    assert_eq!(video_format_label("mpg"), "MPEG");
+    assert_eq!(video_format_label("mpeg"), "MPEG");
+    assert_eq!(video_format_label("3gp"), "3GP");
+    assert_eq!(video_format_label("unknown"), "Video");
+  }
+
+  /// The video player reuses the audio time and seek helpers, so the same
+  /// rendering and clamping rules apply to video durations.
+  #[test]
+  fn video_reuses_audio_time_and_seek_helpers() {
+    assert_eq!(format_audio_time_opt(Some(125.0)), "2:05");
+    assert_eq!(format_audio_time_opt(None), "--:--");
+    assert_eq!(format_audio_time(3725.0), "1:02:05");
+    assert_eq!(clamp_audio_seek(90.0, 120.0), 90.0);
+    assert_eq!(clamp_audio_seek(200.0, 120.0), 120.0);
+    assert_eq!(clamp_audio_seek(-5.0, 120.0), 0.0);
+    assert_eq!(clamp_audio_seek(5.0, 0.0), 0.0);
+    assert_eq!(clamp_audio_seek(f64::NAN, 120.0), 0.0);
+  }
+
+  /// Build a minimal MP4: `ftyp` plus `moov` with `mvhd` (v0 duration)
+  /// and one `trak/tkhd` (v0 resolution as 16.16 fixed point).
+  fn minimal_mp4(timescale: u32, duration: u32, width: u32, height: u32) -> Vec<u8> {
+    let mut mvhd_body = Vec::new();
+    mvhd_body.push(0); // version 0
+    mvhd_body.extend_from_slice(&[0, 0, 0]); // flags
+    mvhd_body.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // created + modified
+    mvhd_body.extend_from_slice(&timescale.to_be_bytes());
+    mvhd_body.extend_from_slice(&duration.to_be_bytes());
+    let mut mvhd = Vec::new();
+    mvhd.extend_from_slice(&((mvhd_body.len() + 8) as u32).to_be_bytes());
+    mvhd.extend_from_slice(b"mvhd");
+    mvhd.extend_from_slice(&mvhd_body);
+    let mut tkhd_body = Vec::new();
+    tkhd_body.push(0); // version 0
+    tkhd_body.extend_from_slice(&[0, 0, 0]); // flags
+    tkhd_body.extend_from_slice(&[0u8; 8]); // created + modified
+    tkhd_body.extend_from_slice(&1u32.to_be_bytes()); // track id
+    tkhd_body.extend_from_slice(&[0u8; 4]); // reserved
+    tkhd_body.extend_from_slice(&duration.to_be_bytes()); // duration
+    tkhd_body.extend_from_slice(&[0u8; 8]); // reserved
+    tkhd_body.extend_from_slice(&[0, 0, 0, 0]); // layer + alternate group
+    tkhd_body.extend_from_slice(&[0x01, 0x00, 0, 0]); // volume + reserved
+    tkhd_body.extend_from_slice(&[0u8; 36]); // matrix
+    tkhd_body.extend_from_slice(&(width << 16).to_be_bytes());
+    tkhd_body.extend_from_slice(&(height << 16).to_be_bytes());
+    let mut tkhd = Vec::new();
+    tkhd.extend_from_slice(&((tkhd_body.len() + 8) as u32).to_be_bytes());
+    tkhd.extend_from_slice(b"tkhd");
+    tkhd.extend_from_slice(&tkhd_body);
+    let mut trak = Vec::new();
+    trak.extend_from_slice(&((tkhd.len() + 8) as u32).to_be_bytes());
+    trak.extend_from_slice(b"trak");
+    trak.extend_from_slice(&tkhd);
+    let mut moov = Vec::new();
+    moov.extend_from_slice(&((mvhd.len() + trak.len() + 8) as u32).to_be_bytes());
+    moov.extend_from_slice(b"moov");
+    moov.extend_from_slice(&mvhd);
+    moov.extend_from_slice(&trak);
+    let mut out = Vec::new();
+    out.extend_from_slice(&20u32.to_be_bytes());
+    out.extend_from_slice(b"ftyp");
+    out.extend_from_slice(b"isom");
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(b"isom");
+    out.extend_from_slice(&moov);
+    out
+  }
+
+  #[test]
+  fn video_header_probing() {
+    // 5000 units at 1000 units per second with a 640x480 track.
+    let mp4 = minimal_mp4(1000, 5000, 640, 480);
+    assert_eq!(m4a_duration(&mp4), Some(5.0));
+    assert_eq!(mp4_resolution(&mp4), Some((640, 480)));
+    assert_eq!(mp4_resolution(b"too short"), None);
+    assert_eq!(mp4_resolution(b"\x00\x00\x00\x20ftypisom\x00"), None);
+    // Non-ISO containers report no header duration or resolution.
+    let (duration, resolution) = probe_video_header(&[0x1A, 0x45, 0xDF, 0xA3, 0x93, 0x42]);
+    assert_eq!(duration, None);
+    assert_eq!(resolution, None);
+    let (duration, resolution) = probe_video_header(b"hello world, not video....");
+    assert_eq!(duration, None);
+    assert_eq!(resolution, None);
+  }
+
+  #[test]
+  fn probe_video_roundtrip() {
+    let dir = std::env::temp_dir().join("preview-video-test");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("clip.mp4");
+    std::fs::write(&path, minimal_mp4(1000, 5000, 640, 480)).expect("write mp4");
+    let meta = probe_video(&path).expect("probe mp4");
+    assert_eq!(meta.format, "MP4");
+    assert_eq!(meta.duration_secs, Some(5.0));
+    assert_eq!(meta.resolution, Some((640, 480)));
+    assert!(meta.has_duration());
+    assert!(meta.has_resolution());
+    assert!(meta.file_bytes > 0);
+    // EBML bytes probe with an unknown duration, never an error.
+    let mkv_path = dir.join("film.mkv");
+    std::fs::write(&mkv_path, [0x1A, 0x45, 0xDF, 0xA3, 0x93, 0x42]).expect("write ebml");
+    let mkv_meta = probe_video(&mkv_path).expect("probe mkv stub");
+    assert_eq!(mkv_meta.format, "MKV");
+    assert_eq!(mkv_meta.duration_secs, None);
+    assert_eq!(mkv_meta.resolution, None);
+    assert!(!mkv_meta.has_duration());
+    assert!(!mkv_meta.has_resolution());
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&mkv_path);
+  }
+
+  #[test]
+  fn probe_video_reports_reasons() {
+    assert!(probe_video(Path::new("/nonexistent-preview-test/missing.mp4")).is_err());
+    let dir = std::env::temp_dir().join("preview-video-test");
+    let _ = std::fs::create_dir_all(&dir);
+    assert!(probe_video(&dir).is_err());
+    let empty = dir.join("empty.mp4");
+    std::fs::write(&empty, b"").expect("write empty");
+    assert!(probe_video(&empty).is_err());
+    let _ = std::fs::remove_file(&empty);
   }
 
   #[test]

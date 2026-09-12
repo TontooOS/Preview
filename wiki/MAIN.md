@@ -22,6 +22,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 | Pdf | [Pdf.md](Pdf.md) | Read-only PDF page viewer with navigation, zoom and fit width |
 | Image | [Image.md](Image.md) | Read-only picture viewer with zoom and fit window |
 | Audio | [Audio.md](Audio.md) | Read-only audio player with play/pause, seek, volume and file info |
+| Video | [Video.md](Video.md) | Read-only video player with picture, play/pause, seek, volume and file info |
 
 ## Quick Start
 
@@ -60,6 +61,14 @@ See [Preview.md](Preview.md) for details.
   play/pause, seek slider with elapsed/total time, volume slider, format
   plus header duration plus file size in the status line, magic-byte
   sniffing, playback cleanup on file switch and window close,
-  corrupt/missing/decoder hints, `audio.*` and `status.audio` keys in
-  `lang/en_us.json` and `lang/de_de.json`; needs GStreamer codec plugins
-  on the system, see `wiki/Audio.md`).
+   corrupt/missing/decoder hints, `audio.*` and `status.audio` keys in
+   `lang/en_us.json` and `lang/de_de.json`; needs GStreamer codec plugins
+   on the system, see `wiki/Audio.md`).
+- 2026-09-12: Video support (read-only player with `gtk::Video` driven by
+  `gtk::MediaFile`, play/pause, seek slider with elapsed/total time,
+  volume slider, format plus header resolution plus duration plus file
+  size in the status line, magic-byte sniffing, playback cleanup on file
+  switch and window close, corrupt/missing/decoder/audio-only hints,
+  `video.*` and `status.video` keys in `lang/en_us.json` and
+  `lang/de_de.json`; needs GStreamer codec plugins on the system, see
+  `wiki/Video.md`).
