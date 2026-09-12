@@ -9,19 +9,6 @@ or the native file dialog.
 
 Explore more at https://github.com/TontooOS/Libs
 
-## Wiki
-
-See [wiki/MAIN.md](wiki/MAIN.md) for the full documentation.
-
-## Run
-
-```bash
-cargo run
-cargo run -- /path/to/file.md
-```
-
-Bundle ID: `com.tontoo.preview` (see `tontoo.proj`).
-
 ## License
 
 TCL v26.1
