@@ -48,6 +48,8 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Debug logs for the live window size (`[preview][window]`
+  on realize plus on every size change via a 200 ms poll).
 - 2026-09-13: Removed the in-page image buttons (`Zoom Out`, `Zoom In`,
   `Fit Window`); zoom runs through the header toolbar icons.
 - 2026-09-13: Header icon toolbar (Finder-style `Toolbar` with
