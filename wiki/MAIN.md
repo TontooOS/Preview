@@ -48,6 +48,11 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Pinned default window size via `force_size(939, 692)` so
+  the half-monitor cap no longer shrinks the window; fit mode keeps the
+  picture inside the viewport without explicit sizing (manual zoom
+  scrolls, leaving fit syncs the factor first).
+
 - 2026-09-13: Uniform frame (16px to the window edge on all four
   sides, 8px gaps between header, content and status).
 - 2026-09-13: Default window size 939x692; removed the temporary window

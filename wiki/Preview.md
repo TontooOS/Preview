@@ -55,6 +55,7 @@ Rules:
 ```rust
 let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
 app.no_window_bar(); // traffic lights are drawn directly on the window
+app.force_size(939, 692); // exact size: bypass natural-size and half-monitor cap
 app.auto_color_scheme(); // live Dark/Light follow
 app.run();
 ```

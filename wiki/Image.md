@@ -162,7 +162,10 @@ pub fn format_file_size(bytes: u64) -> String;
 `gtk::Picture` and no in-page button bar. Zoom runs through the header
 toolbar (`plus.magnifyingglass` / `minus.magnifyingglass`, sensitive
 only for PDF and image pages); `Edit` and `Save` are hidden and `Ctrl+S`
-is a no-op for images.
+is a no-op for images. Fit mode never sets an explicit picture size, so
+`Contain` plus `can_shrink` keeps the picture inside the viewport on
+every resize instead of overflowing into scrollable clipping; only
+manual zoom sets an explicit size.
 
 | Control | Key | Behavior |
 |---|---|---|

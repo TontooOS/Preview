@@ -238,6 +238,11 @@ fn toolbar_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, zoom_in: bool
     state.borrow_mut().pdf_zoom = next;
     apply_pdf_zoom(state, widgets);
   } else if kind == FileKind::Image {
+    if state.borrow().img_fit {
+      // Leaving fit mode: sync the factor from the live viewport first
+      // so the first manual step continues smoothly instead of jumping.
+      sync_image_fit_factor(state, widgets);
+    }
     let zoom = state.borrow().img_zoom;
     let next = if zoom_in {
       model::image_zoom_in(zoom)
@@ -1198,6 +1203,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let state = state.clone();
     let widgets = widgets.clone();
     img_zoom_in_btn.connect_clicked(move |_| {
+      if state.borrow().img_fit {
+        sync_image_fit_factor(&state, &widgets);
+      }
       let zoom = model::image_zoom_in(state.borrow().img_zoom);
       state.borrow_mut().img_zoom = zoom;
       state.borrow_mut().img_fit = false;
@@ -1209,6 +1217,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let state = state.clone();
     let widgets = widgets.clone();
     img_zoom_out_btn.connect_clicked(move |_| {
+      if state.borrow().img_fit {
+        sync_image_fit_factor(&state, &widgets);
+      }
       let zoom = model::image_zoom_out(state.borrow().img_zoom);
       state.borrow_mut().img_zoom = zoom;
       state.borrow_mut().img_fit = false;
@@ -2303,24 +2314,9 @@ fn image_base_size(state: &Rc<RefCell<State>>) -> Option<(u32, u32)> {
   }
 }
 
-/// Apply the image zoom factor via an explicit picture size so the aspect
-/// ratio is preserved and the scrolled window scrolls past the viewport.
-fn apply_image_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
-  let zoom = state.borrow().img_zoom;
-  match image_base_size(state) {
-    Some((base_width, base_height)) => {
-      let (width, height) = model::zoomed_size(base_width, base_height, zoom);
-      widgets.img_picture.set_size_request(width as i32, height as i32);
-    }
-    None => widgets.img_picture.set_size_request(-1, -1),
-  }
-  widgets.img_picture.set_content_fit(gtk::ContentFit::Contain);
-}
-
-/// Fit the picture into the current viewport (cheap: computed once from
-/// the current allocation; press Fit again after resizes). Falls back to
-/// the current zoom when the viewport is not allocated yet.
-fn apply_image_fit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+/// Sync the zoom factor to the current viewport without touching the
+/// picture size. Returns true when the viewport is allocated.
+fn sync_image_fit_factor(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) -> bool {
   let base = image_base_size(state);
   let (view_width, view_height) = (
     widgets.img_scroll.width(),
@@ -2330,7 +2326,47 @@ fn apply_image_fit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     if view_width > 0 && view_height > 0 {
       state.borrow_mut().img_zoom =
         model::fit_zoom_for(base_width, base_height, view_width, view_height);
+      return true;
     }
+  }
+  false
+}
+
+/// Apply the image zoom factor. Fit mode never sets an explicit picture
+/// size: `Contain` plus `can_shrink` keeps the picture inside the viewport
+/// on every resize. An explicit size would turn the page into scrollable
+/// overflow clipped by the window corners. Manual zoom sets an explicit
+/// size so the scrolled window scrolls past the viewport.
+fn apply_image_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if state.borrow().img_fit {
+    widgets.img_picture.set_size_request(-1, -1);
+  } else {
+    let zoom = state.borrow().img_zoom;
+    match image_base_size(state) {
+      Some((base_width, base_height)) => {
+        let (width, height) = model::zoomed_size(base_width, base_height, zoom);
+        widgets.img_picture.set_size_request(width as i32, height as i32);
+      }
+      None => widgets.img_picture.set_size_request(-1, -1),
+    }
+  }
+  widgets.img_picture.set_content_fit(gtk::ContentFit::Contain);
+}
+
+/// Fit the picture into the current viewport. The picture itself stays
+/// size-free (see [`apply_image_zoom`]); only the zoom factor is synced
+/// for the next manual step. When the viewport is not allocated yet (cold
+/// start), the factor sync is deferred to an idle callback after layout.
+fn apply_image_fit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  if !sync_image_fit_factor(state, widgets) {
+    let state_c = state.clone();
+    let widgets_c = widgets.clone();
+    glib::idle_add_local(move || {
+      if state_c.borrow().img_fit {
+        sync_image_fit_factor(&state_c, &widgets_c);
+      }
+      glib::ControlFlow::Break
+    });
   }
   apply_image_zoom(state, widgets);
 }
