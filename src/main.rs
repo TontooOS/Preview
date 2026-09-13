@@ -43,7 +43,7 @@ fn main() {
     Some(path) => model::display_name(path),
     None => lang::t("app.title"),
   };
-  let mut app = App::with_delegate(title, 960, 640, PreviewDelegate { initial });
+  let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
   // No system decoration bar: traffic lights are drawn directly on the window.
   app.no_window_bar();
   app.auto_color_scheme();

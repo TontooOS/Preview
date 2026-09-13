@@ -1,6 +1,6 @@
 # Preview – Wiki
 
-Preview is the TontooOS document viewer basis: a 960x640 TontooUI window
+Preview is the TontooOS document viewer basis: a 939x692 TontooUI window
 with an empty state (centered open button), a text viewer with line
 numbers and a rendered Markdown preview plus raw edit mode. Saving is
 manual only (`Save` button, `Ctrl+S`, close dialog with Cancel / Save /
@@ -48,8 +48,8 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
-- 2026-09-13: Debug logs for the live window size (`[preview][window]`
-  on realize plus on every size change via a 200 ms poll).
+- 2026-09-13: Default window size 939x692; removed the temporary window
+  size debug logs.
 - 2026-09-13: Removed the in-page image buttons (`Zoom Out`, `Zoom In`,
   `Fit Window`); zoom runs through the header toolbar icons.
 - 2026-09-13: Header icon toolbar (Finder-style `Toolbar` with

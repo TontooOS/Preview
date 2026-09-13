@@ -986,32 +986,6 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     root.connect_realize(move |w| {
       let Some(toplevel) = w.root() else { return };
       let Ok(window) = toplevel.downcast::<gtk::ApplicationWindow>() else { return };
-      // Debug: log the live window size while it is resized (drag).
-      // GTK4 has no size-allocate notifier in gtk 0.9, so poll the
-      // window and log on every change.
-      eprintln!(
-        "[preview][window] realized {}x{} (default {}x{})",
-        window.width(),
-        window.height(),
-        window.default_width(),
-        window.default_height()
-      );
-      let size_win = window.clone();
-      let last_size = Rc::new(Cell::new((window.width(), window.height())));
-      glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-        let now = (size_win.width(), size_win.height());
-        if now != last_size.get() {
-          last_size.set(now);
-          eprintln!(
-            "[preview][window] size {}x{} (default {}x{})",
-            now.0,
-            now.1,
-            size_win.default_width(),
-            size_win.default_height()
-          );
-        }
-        glib::ControlFlow::Continue
-      });
       let state = state.clone();
       let widgets = widgets.clone();
       let force = force.clone();

@@ -1,6 +1,6 @@
 # Preview
 
-TontooOS document viewer basis: a 960x640 window without a system
+TontooOS document viewer basis: a 939x692 window without a system
 decoration bar (traffic lights sit directly on the window), with a top
 row (`TrafficLights` plus file name, `Edit`-`Done` / `Save` text actions
 and a Finder-style `Toolbar` with open, zoom in, zoom out, share and
@@ -49,7 +49,7 @@ Rules:
 - Share and annotate stay insensitive until wired.
 
 ```rust
-let mut app = App::with_delegate(title, 960, 640, PreviewDelegate { initial });
+let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
 app.no_window_bar(); // traffic lights are drawn directly on the window
 app.auto_color_scheme(); // live Dark/Light follow
 app.run();
