@@ -284,11 +284,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
   // Top row: traffic lights directly on the window (no decoration bar),
-  // then title + subtitle, then actions.
+  // then title + subtitle, then actions. Uniform frame: 16px to the
+  // window edge on all sides, 8px gaps between sections.
   let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
   header.set_margin_start(16);
   header.set_margin_end(16);
-  header.set_margin_top(12);
+  header.set_margin_top(16);
   header.set_margin_bottom(8);
 
   let lights = crate::UIKit::widgets::TrafficLights::new().to_gtk();
@@ -338,10 +339,13 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   tb_zoom_out.set_tooltip_text(Some(&lang::t("pdf.zoom_out")));
   root.append(&header);
 
-  // Content stack: empty / text / unsupported.
+  // Content stack: empty / text / unsupported. Same 16px side
+  // distance as header and status so the frame is uniform.
   let stack = gtk::Stack::new();
   stack.set_hexpand(true);
   stack.set_vexpand(true);
+  stack.set_margin_start(16);
+  stack.set_margin_end(16);
 
   // Empty state.
   let empty_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -830,14 +834,15 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
 
   root.append(&stack);
 
-  // Status line.
+  // Status line. Uniform frame: 16px to the bottom window edge,
+  // 8px gap to the content above.
   let status = gtk::Label::new(Some(""));
   status.set_halign(gtk::Align::Start);
   status.add_css_class("dim-label");
   status.set_margin_start(16);
   status.set_margin_end(16);
-  status.set_margin_top(6);
-  status.set_margin_bottom(8);
+  status.set_margin_top(8);
+  status.set_margin_bottom(16);
   root.append(&status);
 
   apply_css(&root);

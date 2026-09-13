@@ -29,6 +29,10 @@ From top to bottom the window contains:
 2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
 3. Status line: line count and save state
 
+Uniform frame: 16px from the content to the window edge on all four
+sides (header top, content sides, status bottom), 8px gaps between the
+sections.
+
 ## Header Toolbar
 
 Finder-style `Toolbar` (`TontooUI`) on the far right of the top row:

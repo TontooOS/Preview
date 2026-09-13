@@ -48,6 +48,8 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Uniform frame (16px to the window edge on all four
+  sides, 8px gaps between header, content and status).
 - 2026-09-13: Default window size 939x692; removed the temporary window
   size debug logs.
 - 2026-09-13: Removed the in-page image buttons (`Zoom Out`, `Zoom In`,
