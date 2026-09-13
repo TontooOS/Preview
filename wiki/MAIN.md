@@ -48,6 +48,11 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Header icon toolbar (Finder-style `Toolbar` with
+  `doc.badge.arrow.up.fill`, `plus.magnifyingglass`,
+  `minus.magnifyingglass`, `square.and.arrow.up.fill`,
+  `square.and.pencil`; open plus PDF/image zoom wired, share and
+  annotate inert).
 - 2026-09-13: Removed the system decoration bar; traffic lights sit
   directly on the window (`app.no_window_bar()` plus `TrafficLights` in
   the top row, no separator).

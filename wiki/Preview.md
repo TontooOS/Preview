@@ -2,10 +2,11 @@
 
 TontooOS document viewer basis: a 960x640 window without a system
 decoration bar (traffic lights sit directly on the window), with a top
-row (`TrafficLights` plus file name, `Open` / `Edit`-`Done` / `Save`
-actions), an empty state with a centered open button, a text viewer
-state with a centered open button, a text viewer with line numbers on the
-left, and a Markdown mode with a rendered preview plus a raw edit mode.
+row (`TrafficLights` plus file name, `Edit`-`Done` / `Save` text actions
+and a Finder-style `Toolbar` with open, zoom in, zoom out, share and
+annotate icons), an empty state with a centered open button, a text
+viewer with line numbers on the left, and a Markdown mode with a
+rendered preview plus a raw edit mode.
 PDFs open read-only in a page viewer (see [Pdf.md](Pdf.md)).
 Images open read-only as pictures (see [Image.md](Image.md)).
 Audio files open read-only in a compact player (see [Audio.md](Audio.md)).
@@ -24,9 +25,28 @@ binary garbage.
 
 From top to bottom the window contains:
 
-1. Top row: traffic lights directly on the window plus title plus subtitle on the left, actions on the right (no decoration bar, no separator)
+1. Top row: traffic lights directly on the window plus title plus subtitle on the left, `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
 2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
 3. Status line: line count and save state
+
+## Header Toolbar
+
+Finder-style `Toolbar` (`TontooUI`) on the far right of the top row:
+
+| Icon | Behavior |
+|---|---|
+| `doc.badge.arrow.up.fill` | Opens the native file dialog |
+| `plus.magnifyingglass` | Zooms in (PDF font scale, image pixbuf scale) |
+| `minus.magnifyingglass` | Zooms out (PDF font scale, image pixbuf scale) |
+| `square.and.arrow.up.fill` | No action yet (inert, insensitive) |
+| `square.and.pencil` | No action yet (inert, insensitive) |
+
+Rules:
+
+- The toolbar is always visible; the open icon replaces the old `Open`
+  text button.
+- Zoom icons are sensitive only for PDF and image pages.
+- Share and annotate stay insensitive until wired.
 
 ```rust
 let mut app = App::with_delegate(title, 960, 640, PreviewDelegate { initial });

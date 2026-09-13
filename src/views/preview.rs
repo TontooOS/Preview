@@ -25,6 +25,7 @@ use crate::markdown;
 use crate::model::{self, FileKind};
 use crate::pptx;
 use crate::xlsx;
+use crate::TontooUI::{Toolbar, ToolbarItem};
 use crate::UIKit::widget::{Widget, WidgetId, next_widget_id};
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -121,6 +122,11 @@ struct Widgets {
   subtitle: gtk::Label,
   edit_btn: gtk::Button,
   save_btn: gtk::Button,
+  tb_open: gtk::Button,
+  tb_zoom_in: gtk::Button,
+  tb_zoom_out: gtk::Button,
+  tb_share: gtk::Button,
+  tb_annotate: gtk::Button,
   status: gtk::Label,
   stack: gtk::Stack,
   text_stack: gtk::Stack,
@@ -202,6 +208,49 @@ struct Widgets {
   root: gtk::Box,
 }
 
+/// Collect the rendered `GtkButton`s inside a TontooUI `Toolbar` in
+/// visual order, so stateful Preview actions (open dialog, zoom) can be
+/// wired with `Rc` closures via `connect_clicked`.
+fn collect_toolbar_buttons(toolbar: &gtk::Widget) -> Vec<gtk::Button> {
+  fn push_buttons(node: &gtk::Widget, out: &mut Vec<gtk::Button>) {
+    let mut cursor = node.first_child();
+    while let Some(widget) = cursor {
+      cursor = widget.next_sibling();
+      if let Ok(btn) = widget.clone().downcast::<gtk::Button>() {
+        out.push(btn);
+      } else {
+        push_buttons(&widget, out);
+      }
+    }
+  }
+  let mut buttons = Vec::new();
+  push_buttons(toolbar, &mut buttons);
+  buttons
+}
+
+/// Zoom step shared by the header toolbar icons: PDF pages scale the text
+/// font, images scale the pixbuf. Other kinds ignore the step.
+fn toolbar_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, zoom_in: bool) {
+  let kind = state.borrow().kind;
+  if kind == FileKind::Pdf {
+    let zoom = state.borrow().pdf_zoom;
+    let next = if zoom_in { (zoom + 0.25).min(3.0) } else { (zoom - 0.25).max(0.5) };
+    state.borrow_mut().pdf_zoom = next;
+    apply_pdf_zoom(state, widgets);
+  } else if kind == FileKind::Image {
+    let zoom = state.borrow().img_zoom;
+    let next = if zoom_in {
+      model::image_zoom_in(zoom)
+    } else {
+      model::image_zoom_out(zoom)
+    };
+    state.borrow_mut().img_zoom = next;
+    state.borrow_mut().img_fit = false;
+    widgets.img_fit_btn.set_active(false);
+    apply_image_zoom(state, widgets);
+  }
+}
+
 /// Root widget for the Preview app.
 pub struct PreviewRoot {
   id: WidgetId,
@@ -258,16 +307,35 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   title_box.append(&subtitle);
   header.append(&title_box);
 
-  let open_btn = gtk::Button::with_label(&lang::t("action.open"));
-  open_btn.add_css_class("suggested-action");
   let edit_btn = gtk::Button::with_label(&lang::t("action.edit"));
   let save_btn = gtk::Button::with_label(&lang::t("action.save"));
   save_btn.set_sensitive(false);
   save_btn.set_visible(false);
   edit_btn.set_visible(false);
-  header.append(&open_btn);
   header.append(&edit_btn);
   header.append(&save_btn);
+
+  // Icon toolbar on the far right (Finder-style TontooUI element):
+  // open document, zoom in, zoom out, share (no action yet),
+  // annotate (no action yet).
+  let toolbar = Toolbar::new()
+    .item(ToolbarItem::new("doc.badge.arrow.up.fill"))
+    .item(ToolbarItem::new("plus.magnifyingglass"))
+    .item(ToolbarItem::new("minus.magnifyingglass"))
+    .item(ToolbarItem::new("square.and.arrow.up.fill"))
+    .item(ToolbarItem::new("square.and.pencil"));
+  let toolbar_gtk = toolbar.to_gtk();
+  toolbar_gtk.set_valign(gtk::Align::Center);
+  header.append(&toolbar_gtk);
+  let tb_buttons = collect_toolbar_buttons(&toolbar_gtk);
+  let tb_open = tb_buttons.first().cloned().unwrap_or_else(gtk::Button::new);
+  let tb_zoom_in = tb_buttons.get(1).cloned().unwrap_or_else(gtk::Button::new);
+  let tb_zoom_out = tb_buttons.get(2).cloned().unwrap_or_else(gtk::Button::new);
+  let tb_share = tb_buttons.get(3).cloned().unwrap_or_else(gtk::Button::new);
+  let tb_annotate = tb_buttons.get(4).cloned().unwrap_or_else(gtk::Button::new);
+  tb_open.set_tooltip_text(Some(&lang::t("action.open")));
+  tb_zoom_in.set_tooltip_text(Some(&lang::t("pdf.zoom_in")));
+  tb_zoom_out.set_tooltip_text(Some(&lang::t("pdf.zoom_out")));
   root.append(&header);
 
   // Content stack: empty / text / unsupported.
@@ -786,6 +854,11 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     subtitle,
     edit_btn: edit_btn.clone(),
     save_btn: save_btn.clone(),
+    tb_open: tb_open.clone(),
+    tb_zoom_in: tb_zoom_in.clone(),
+    tb_zoom_out: tb_zoom_out.clone(),
+    tb_share: tb_share.clone(),
+    tb_annotate: tb_annotate.clone(),
     status,
     stack: stack.clone(),
     text_stack: text_stack.clone(),
@@ -962,11 +1035,11 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
-  // Open actions: native file dialog.
+  // Open actions: native file dialog (toolbar icon plus empty/unsupported states).
   {
     let s = state.clone();
     let w = widgets.clone();
-    open_btn.connect_clicked(move |_| open_dialog(&s, &w));
+    tb_open.connect_clicked(move |_| open_dialog(&s, &w));
     let s = state.clone();
     let w = widgets.clone();
     empty_open.connect_clicked(move |_| open_dialog(&s, &w));
@@ -974,6 +1047,19 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let w = widgets.clone();
     unsup_open.connect_clicked(move |_| open_dialog(&s, &w));
   }
+
+  // Header toolbar zoom icons: zoom in/out for PDF and image kinds.
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    tb_zoom_in.connect_clicked(move |_| toolbar_zoom(&state, &widgets, true));
+  }
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    tb_zoom_out.connect_clicked(move |_| toolbar_zoom(&state, &widgets, false));
+  }
+  // Share and annotate stay inert for now (no action wired).
 
   // Edit / Done toggle.
   {
@@ -1840,6 +1926,15 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     lang::t("action.edit")
   };
   widgets.edit_btn.set_label(&edit_label);
+
+  // Header toolbar: open always works, zoom only for PDF/image pages,
+  // share and annotate stay inert for now.
+  widgets.tb_open.set_sensitive(true);
+  let zoomable = is_pdf || is_image;
+  widgets.tb_zoom_in.set_sensitive(zoomable);
+  widgets.tb_zoom_out.set_sensitive(zoomable);
+  widgets.tb_share.set_sensitive(false);
+  widgets.tb_annotate.set_sensitive(false);
 
   if !has_file {
     widgets.status.set_text(&lang::t("status.empty"));
