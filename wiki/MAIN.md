@@ -48,6 +48,10 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Removed the system decoration bar; traffic lights sit
+  directly on the window (`app.no_window_bar()` plus `TrafficLights` in
+  the top row, no separator).
+
 - 2026-09-12: Initial Preview basis (empty state, text viewer with line
   numbers, Markdown preview/edit, manual save, CLI plus dialog open,
   `lang/en_us.json` and `lang/de_de.json`).

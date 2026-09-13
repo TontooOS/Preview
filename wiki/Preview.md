@@ -1,7 +1,9 @@
 # Preview
 
-TontooOS document viewer basis: a 960x640 window with a header (`Preview`
-title plus file name, `Open` / `Edit`-`Done` / `Save` actions), an empty
+TontooOS document viewer basis: a 960x640 window without a system
+decoration bar (traffic lights sit directly on the window), with a top
+row (`TrafficLights` plus file name, `Open` / `Edit`-`Done` / `Save`
+actions), an empty state with a centered open button, a text viewer
 state with a centered open button, a text viewer with line numbers on the
 left, and a Markdown mode with a rendered preview plus a raw edit mode.
 PDFs open read-only in a page viewer (see [Pdf.md](Pdf.md)).
@@ -22,12 +24,13 @@ binary garbage.
 
 From top to bottom the window contains:
 
-1. Header row: title plus subtitle on the left, actions on the right
+1. Top row: traffic lights directly on the window plus title plus subtitle on the left, actions on the right (no decoration bar, no separator)
 2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
 3. Status line: line count and save state
 
 ```rust
 let mut app = App::with_delegate(title, 960, 640, PreviewDelegate { initial });
+app.no_window_bar(); // traffic lights are drawn directly on the window
 app.auto_color_scheme(); // live Dark/Light follow
 app.run();
 ```

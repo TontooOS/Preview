@@ -25,7 +25,7 @@ use crate::markdown;
 use crate::model::{self, FileKind};
 use crate::pptx;
 use crate::xlsx;
-use crate::UIKit::widget::{WidgetId, next_widget_id};
+use crate::UIKit::widget::{Widget, WidgetId, next_widget_id};
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -219,6 +219,10 @@ impl crate::UIKit::widget::Widget for PreviewRoot {
     self.id
   }
 
+  fn hides_window_bar(&self) -> bool {
+    true
+  }
+
   fn to_gtk(&self) -> gtk::Widget {
     build_ui(self.initial.clone()).upcast()
   }
@@ -230,12 +234,17 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   // Root column: header, content stack, status line.
   let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
-  // Header bar: left title + subtitle, right actions.
+  // Top row: traffic lights directly on the window (no decoration bar),
+  // then title + subtitle, then actions.
   let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
   header.set_margin_start(16);
   header.set_margin_end(16);
   header.set_margin_top(12);
   header.set_margin_bottom(8);
+
+  let lights = crate::UIKit::widgets::TrafficLights::new().to_gtk();
+  lights.set_valign(gtk::Align::Center);
+  header.append(&lights);
 
   let title_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
   title_box.set_hexpand(true);
@@ -260,9 +269,6 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   header.append(&edit_btn);
   header.append(&save_btn);
   root.append(&header);
-
-  let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
-  root.append(&sep);
 
   // Content stack: empty / text / unsupported.
   let stack = gtk::Stack::new();
