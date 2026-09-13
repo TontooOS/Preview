@@ -48,6 +48,8 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-13: Removed the in-page image buttons (`Zoom Out`, `Zoom In`,
+  `Fit Window`); zoom runs through the header toolbar icons.
 - 2026-09-13: Header icon toolbar (Finder-style `Toolbar` with
   `doc.badge.arrow.up.fill`, `plus.magnifyingglass`,
   `minus.magnifyingglass`, `square.and.arrow.up.fill`,

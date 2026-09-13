@@ -1,9 +1,11 @@
 # Image
 
-Image files open read-only on a dedicated picture page: the toolbar
-offers zoom in/out steps plus a fit-window toggle, and the content area
-shows the actual picture (`gtk::Picture`, SF Pro Display is used for the
-surrounding UI text). Raster formats are decoded with the pure-Rust
+Image files open read-only on a dedicated picture page: the content
+area shows the actual picture (`gtk::Picture`, SF Pro Display is used
+for the surrounding UI text) with no in-page buttons. Zoom runs through
+the header toolbar icons (`plus.magnifyingglass` /
+`minus.magnifyingglass`); images open fitted into the viewport.
+Raster formats are decoded with the pure-Rust
 `image` crate (already in the workspace via `CoreIcon`); SVG files are
 handed to GTK (librsvg). Images never show the unsupported page and are
 never editable; broken files show an error hint with the reason instead.
@@ -157,13 +159,14 @@ pub fn format_file_size(bytes: u64) -> String;
 ## Viewer UI
 
 `src/views/preview.rs` adds an `image` page to the content stack with a
-toolbar and a `gtk::Picture`. The toolbar is only visible for images;
-`Edit` and `Save` are hidden and `Ctrl+S` is a no-op for images.
+`gtk::Picture` and no in-page button bar. Zoom runs through the header
+toolbar (`plus.magnifyingglass` / `minus.magnifyingglass`, sensitive
+only for PDF and image pages); `Edit` and `Save` are hidden and `Ctrl+S`
+is a no-op for images.
 
 | Control | Key | Behavior |
 |---|---|---|
-| `Zoom Out` / `Zoom In` | `image.zoom_out` / `image.zoom_in` | Factor in 0.25 steps, clamped to 0.1–8.0, leaves fit mode |
-| `Fit Window` | `image.fit` | Scales the picture into the current viewport once |
+| Header `plus.magnifyingglass` / `minus.magnifyingglass` | `pdf.zoom_in` / `pdf.zoom_out` (tooltips) | Factor in 0.25 steps, clamped to 0.1–8.0, leaves fit mode |
 
 The status line shows `%width% x %height%, %size%, read-only`
 (`status.image`), plus the `image.downscaled` note for huge images, or
@@ -172,8 +175,8 @@ unknown. The window follows the live system color scheme (Dark `#1d1d1d`,
 Light `#ececec`) via `app.auto_color_scheme()`; no background is
 hardcoded.
 
-Fit is computed once from the current viewport allocation; press `Fit
-Window` again after window resizes. Manual zoom leaves fit mode.
+Fit is applied once when the image opens; manual zoom via the header
+toolbar leaves fit mode.
 
 ## Error Cases
 
@@ -240,9 +243,9 @@ Open an image from the command line or the native file dialog:
 cargo run -- /path/to/photo.jpg
 ```
 
-Read the `800 x 600, 124.3 KB, read-only` status, adjust the size with
-`Zoom In` / `Zoom Out`, and press `Fit Window` to scale the picture
-into the viewport. There is no edit mode and no save path for images.
+Read the `800 x 600, 124.3 KB, read-only` status and adjust the size
+with the header toolbar zoom icons. There is no edit mode and no save
+path for images.
 
 ```rust
 let kind = model::classify_file(path);

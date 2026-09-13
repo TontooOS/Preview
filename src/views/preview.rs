@@ -491,8 +491,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pdf_box.append(&pdf_error);
   stack.add_named(&pdf_box, Some("pdf"));
 
-  // Image page: toolbar (zoom out/in, fit window) plus an actual picture
-  // (`gtk::Picture`). Broken images show an error label with the reason.
+  // Image page: actual picture (`gtk::Picture`) without any in-page
+  // buttons (zoom lives in the header toolbar). Broken images show an
+  // error label with the reason.
   let img_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
   img_box.set_hexpand(true);
   img_box.set_vexpand(true);
@@ -509,7 +510,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   img_bar.append(&img_zoom_out_btn);
   img_bar.append(&img_zoom_in_btn);
   img_bar.append(&img_fit_btn);
-  img_box.append(&img_bar);
+  // Kept alive for state (fit toggle) but never shown: zoom runs
+  // through the header toolbar icons.
+  img_bar.set_visible(false);
   let img_picture = gtk::Picture::new();
   img_picture.set_content_fit(gtk::ContentFit::Contain);
   img_picture.set_can_shrink(true);
@@ -2191,7 +2194,7 @@ fn refresh_image(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     ));
     return;
   }
-  widgets.img_bar.set_visible(true);
+  widgets.img_bar.set_visible(false);
   widgets.img_scroll.set_visible(true);
   widgets.img_error.set_visible(false);
   widgets.img_fit_btn.set_active(state.borrow().img_fit);
