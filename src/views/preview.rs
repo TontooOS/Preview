@@ -26,6 +26,7 @@ use crate::markdown;
 use crate::model::{self, FileKind};
 use crate::pptx;
 use crate::xlsx;
+use crate::PDFKit;
 use crate::TontooUI::{Toolbar, ToolbarItem};
 use crate::UIKit::widget::{Widget, WidgetId, next_widget_id};
 use gtk::prelude::*;
@@ -52,6 +53,8 @@ struct State {
   pdf_page: usize,
   pdf_zoom: f64,
   pdf_fit: bool,
+  pdf_dirty: bool,
+  pdf_editor_page: u32,
   img_meta: Option<model::ImageMeta>,
   img_error: Option<String>,
   img_base: Option<gdk_pixbuf::Pixbuf>,
@@ -90,6 +93,8 @@ impl State {
       pdf_page: 0,
       pdf_zoom: 1.0,
       pdf_fit: true,
+      pdf_dirty: false,
+      pdf_editor_page: 1,
       img_meta: None,
       img_error: None,
       img_base: None,
@@ -151,6 +156,7 @@ struct Widgets {
   pdf_buffer: gtk::TextBuffer,
   pdf_error: gtk::Label,
   pdf_css: gtk::CssProvider,
+  pdf_editor_box: gtk::Box,
   img_bar: gtk::Box,
   img_fit_btn: gtk::ToggleButton,
   img_scroll: gtk::ScrolledWindow,
@@ -518,6 +524,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pdf_error.set_vexpand(true);
   pdf_box.append(&pdf_error);
   stack.add_named(&pdf_box, Some("pdf"));
+
+  // PDF editor page: holds the PdfEditorView from PDFKit when editing.
+  let pdf_editor_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  pdf_editor_box.set_hexpand(true);
+  pdf_editor_box.set_vexpand(true);
+  stack.add_named(&pdf_editor_box, Some("pdf-editor"));
 
   // Image page: actual picture (`gtk::Picture`) without any in-page
   // buttons (zoom lives in the header toolbar). Broken images show an
@@ -908,6 +920,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     pdf_buffer: pdf_buffer.clone(),
     pdf_error: pdf_error.clone(),
     pdf_css: pdf_css.clone(),
+    pdf_editor_box: pdf_editor_box.clone(),
     img_bar: img_bar.clone(),
     img_fit_btn: img_fit_btn.clone(),
     img_scroll: img_scroll.clone(),
@@ -1015,7 +1028,8 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
         // changes pending in another file (media itself is never dirty).
         stop_audio(&state);
         stop_video(&state, &widgets);
-        if force.get() || !state.borrow().dirty {
+        let any_dirty = state.borrow().dirty || state.borrow().pdf_dirty;
+        if force.get() || !any_dirty {
           return false.into();
         }
         let win_c = win.clone();
@@ -1042,11 +1056,18 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
           move |response: Result<i32, glib::Error>| {
             match response {
               Ok(2) => {
-                do_save(&state_c, &widgets_c);
+                // Save text if dirty, save PDF if in editor.
+                if state_c.borrow().dirty {
+                  do_save(&state_c, &widgets_c);
+                }
+                if state_c.borrow().pdf_dirty {
+                  save_pdf_editor(&state_c, &widgets_c);
+                }
                 force_c.set(true);
                 win_c.destroy();
               }
               Ok(1) => {
+                state_c.borrow_mut().pdf_dirty = false;
                 force_c.set(true);
                 win_c.destroy();
               }
@@ -1099,18 +1120,31 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
-  // Edit / Done toggle.
+  // Edit / Done toggle (text/markdown) or PDF editor open/save.
   {
     let state = state.clone();
     let widgets = widgets.clone();
     edit_btn.connect_clicked(move |_| {
-      let next = if state.borrow().mode == Mode::Edit { Mode::Preview } else { Mode::Edit };
-      // Leaving edit with unsaved changes keeps the buffer; preview shows
-      // the last saved content until the user saves (manual-save model).
-      if next == Mode::Preview && state.borrow().dirty {
-        sync_preview_from_edit(&state, &widgets, false);
+      let kind = state.borrow().kind;
+      if kind == FileKind::Pdf {
+        let is_edit = state.borrow().mode == Mode::Edit;
+        if is_edit {
+          // Save: apply changes and close the editor.
+          save_pdf_editor(&state, &widgets);
+          state.borrow_mut().mode = Mode::Preview;
+          state.borrow_mut().pdf_dirty = false;
+        } else {
+          // Open the PDFKit editor.
+          open_pdf_editor(&state, &widgets);
+          state.borrow_mut().mode = Mode::Edit;
+        }
+      } else {
+        let next = if state.borrow().mode == Mode::Edit { Mode::Preview } else { Mode::Edit };
+        if next == Mode::Preview && state.borrow().dirty {
+          sync_preview_from_edit(&state, &widgets, false);
+        }
+        state.borrow_mut().mode = next;
       }
-      state.borrow_mut().mode = next;
       refresh_chrome(&state, &widgets);
       refresh_body(&state, &widgets);
     });
@@ -2058,11 +2092,102 @@ fn refresh_info_popover(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.info_popover.set_child(Some(&content));
 }
 
+/// Open the PDFKit editor view for the current PDF file.
+fn open_pdf_editor(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let path = match state.borrow().path.clone() {
+    Some(p) => p,
+    None => return,
+  };
+  // Clear any previous editor.
+  while let Some(child) = widgets.pdf_editor_box.first_child() {
+    widgets.pdf_editor_box.remove(&child);
+  }
+  let is_dark = crate::UIKit::app::current_color_scheme()
+    .map(|s| s == crate::UIKit::app::ColorScheme::Dark)
+    .unwrap_or(false);
+  let current_page = (state.borrow().pdf_page + 1) as u32;
+
+  let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  container.set_hexpand(true);
+  container.set_vexpand(true);
+
+  // Annotation toolbar from PDFKit.
+  let ann_bar = PDFKit::PdfAnnotationBar::new();
+  let ann_bar_view = crate::UIKit::view::View::new(ann_bar)
+    .with_frame(0.0, 0.0, 800.0, 32.0);
+  container.append(&ann_bar_view.to_gtk());
+
+  let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+  container.append(&sep);
+
+  // Scrollable preview area.
+  let scroll = gtk::ScrolledWindow::new();
+  scroll.set_hexpand(true);
+  scroll.set_vexpand(true);
+  let preview = PDFKit::PdfPreview::new(&path)
+    .page(current_page)
+    .dark(is_dark);
+  let preview_view = crate::UIKit::view::View::new(preview)
+    .with_frame(0.0, 0.0, 800.0, 560.0);
+  scroll.set_child(Some(&preview_view.to_gtk()));
+  container.append(&scroll);
+
+  // Page control at bottom.
+  let total = state.borrow().pdf.as_ref().map(|d| d.page_count()).unwrap_or(1) as u32;
+  let page_ctrl = PDFKit::PdfPageControl::new(total)
+    .current(current_page);
+  let page_view = crate::UIKit::view::View::new(page_ctrl)
+    .with_frame(0.0, 0.0, 800.0, 32.0);
+  container.append(&page_view.to_gtk());
+
+  widgets.pdf_editor_box.append(&container);
+}
+
+/// Save the PDF from the editor and close the editor view.
+fn save_pdf_editor(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let path = match state.borrow().path.clone() {
+    Some(p) => p,
+    None => return,
+  };
+  // Open with PDFKit's Document and PdfEditor, then save in-place.
+  match PDFKit::Document::open(&path) {
+    Ok(doc) => {
+      let mut editor = PDFKit::PdfEditor::new(doc);
+      if let Err(e) = editor.save_to(&path) {
+        eprintln!("PDF save failed: {e}");
+      }
+    }
+    Err(e) => {
+      eprintln!("PDF open for save failed: {e}");
+    }
+  }
+  // Clear the editor UI.
+  while let Some(child) = widgets.pdf_editor_box.first_child() {
+    widgets.pdf_editor_box.remove(&child);
+  }
+  // Reset PDF state so it re-opens from the updated file.
+  state.borrow_mut().pdf = None;
+  state.borrow_mut().error = None;
+  state.borrow_mut().pdf_page = 0;
+  // Re-open the PDF to refresh the preview.
+  if let Some(p) = state.borrow().path.clone() {
+    match model::PdfDoc::open(&p) {
+      Ok(doc) => {
+        state.borrow_mut().pdf = Some(Rc::new(doc));
+      }
+      Err(reason) => {
+        state.borrow_mut().error = Some(reason);
+      }
+    }
+  }
+}
+
 fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let st = state.borrow();
   let has_file = st.path.is_some();
   let editable = has_file && (st.kind == FileKind::Text || st.kind == FileKind::Markdown);
   let is_pdf = has_file && st.kind == FileKind::Pdf;
+  let is_pdf_edit = is_pdf && st.mode == Mode::Edit;
   let is_image = has_file && st.kind == FileKind::Image;
 
   if let Some(path) = st.path.as_ref() {
@@ -2074,10 +2199,14 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   }
   widgets.subtitle.set_visible(false);
 
-  widgets.edit_btn.set_visible(editable);
-  widgets.save_btn.set_visible(editable && st.mode == Mode::Edit);
-  widgets.save_btn.set_sensitive(st.dirty);
-  let edit_label = if st.mode == Mode::Edit {
+  // Edit button: visible for text/markdown (toggle edit/preview) and
+  // for PDF (opens the PDFKit editor, becomes Save while editing).
+  let show_edit = editable || is_pdf;
+  widgets.edit_btn.set_visible(show_edit);
+  widgets.save_btn.set_visible(false);
+  let edit_label = if is_pdf_edit {
+    lang::t("action.save")
+  } else if st.mode == Mode::Edit {
     lang::t("action.done")
   } else {
     lang::t("action.edit")
@@ -2109,7 +2238,9 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
 
   let page = if !has_file {
     "empty"
-  } else if st.kind == FileKind::Pdf {
+  } else if is_pdf_edit {
+    "pdf-editor"
+  } else if is_pdf {
     "pdf"
   } else if st.kind == FileKind::Image {
     "image"
