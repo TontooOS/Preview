@@ -48,6 +48,8 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Header file name ellipsizes with `...` at the end, so the
+  action buttons and toolbar stay visible at any window width.
 - 2026-09-14: Image fit mode always shows the whole picture: scrollbars
   stay off in fit mode so the image scales into the visible window area
   on every resize; manual zoom re-enables scrolling.

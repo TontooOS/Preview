@@ -309,6 +309,10 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   let title = gtk::Label::new(Some(&lang::t("app.title")));
   title.set_halign(gtk::Align::Start);
   title.set_valign(gtk::Align::Center);
+  title.set_hexpand(true);
+  // Long file names truncate with "..." at the end instead of pushing
+  // the action buttons and toolbar out of the window.
+  title.set_ellipsize(gtk::pango::EllipsizeMode::End);
   title.add_css_class("title-1");
   let subtitle = gtk::Label::new(Some(""));
   subtitle.set_visible(false);
