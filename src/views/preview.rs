@@ -291,7 +291,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
   // Top row: traffic lights directly on the window (no decoration bar),
-  // then title + subtitle, then actions. Uniform frame: 16px to the
+  // then file name only, then actions. Uniform frame: 16px to the
   // window edge on all sides, 8px gaps between sections.
   let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
   header.set_margin_start(16);
@@ -305,14 +305,14 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
 
   let title_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
   title_box.set_hexpand(true);
+  title_box.set_valign(gtk::Align::Center);
   let title = gtk::Label::new(Some(&lang::t("app.title")));
   title.set_halign(gtk::Align::Start);
+  title.set_valign(gtk::Align::Center);
   title.add_css_class("title-1");
-  let subtitle = gtk::Label::new(Some(&lang::t("empty.hint")));
-  subtitle.set_halign(gtk::Align::Start);
-  subtitle.add_css_class("dim-label");
+  let subtitle = gtk::Label::new(Some(""));
+  subtitle.set_visible(false);
   title_box.append(&title);
-  title_box.append(&subtitle);
   header.append(&title_box);
 
   let edit_btn = gtk::Button::with_label(&lang::t("action.edit"));
@@ -1943,11 +1943,11 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
     widgets.title.set_text(&name);
-    widgets.subtitle.set_text(&path.display().to_string());
     widgets.title_box.set_visible(true);
   } else {
     widgets.title_box.set_visible(false);
   }
+  widgets.subtitle.set_visible(false);
 
   widgets.edit_btn.set_visible(editable);
   widgets.save_btn.set_visible(editable && st.mode == Mode::Edit);

@@ -48,6 +48,9 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Header shows the file name only (full path subtitle
+  removed for all kinds); header and status line stay hidden until a
+  file is open.
 - 2026-09-14: Empty state cleanup (header title plus subtitle and status
   line stay hidden until a file is open, so the centered title and hint
   show once); open button restyled as a large pill

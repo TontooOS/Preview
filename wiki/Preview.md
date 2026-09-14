@@ -29,7 +29,7 @@ binary garbage.
 
 From top to bottom the window contains:
 
-1. Top row: traffic lights directly on the window plus title plus subtitle on the left (visible only when a file is open, so the empty state shows the title once in the center), `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
+1. Top row: traffic lights directly on the window plus file name only on the left (no path, visible only when a file is open, so the empty state shows the title once in the center), `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
 2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
 3. Status line: line count and save state (hidden when no file is open)
 
