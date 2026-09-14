@@ -67,5 +67,18 @@
   "xlsx.load_failed": "Diese Tabelle kann nicht geöffnet werden: %reason%",
   "xlsx.truncated": "Große Tabelle: nur die ersten %rows% Zeilen und %cols% Spalten werden gezeigt",
   "xlsx.empty_sheet": "Dieses Blatt enthält keine Daten.",
-  "status.xlsx": "%format%, %sheets% Blätter, %rows%, %size%, schreibgeschützt"
+  "status.xlsx": "%format%, %sheets% Blätter, %rows%, %size%, schreibgeschützt",
+  "info.file_name": "Dateiname",
+  "info.size": "Größe",
+  "info.lines": "Zeilen",
+  "info.words": "Wörter",
+  "info.pages": "Seiten",
+  "info.pixels": "Pixel",
+  "info.format": "Format",
+  "info.duration": "Dauer",
+  "info.resolution": "Auflösung",
+  "info.paragraphs": "Absätze",
+  "info.slides": "Folien",
+  "info.sheets": "Blätter",
+  "info.grid": "Raster"
 }

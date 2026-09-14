@@ -47,7 +47,7 @@ Finder-style `Toolbar` (`TontooUI`) on the far right of the top row:
 | `minus.magnifyingglass` | Zooms out (PDF font scale, image pixbuf scale) |
 | `square.and.arrow.up.fill` | No action yet (inert, insensitive) |
 | `square.and.pencil` | No action yet (inert, insensitive) |
-| `info.circle` | No action yet (far right, inert) |
+| `info.circle` | Opens the file info popover (file name, size, kind-specific details) |
 
 Rules:
 
@@ -55,7 +55,11 @@ Rules:
   text button.
 - Zoom icons are sensitive only for PDF and image pages.
 - Share and annotate stay insensitive until wired.
-- Info sits far right and does nothing yet.
+- Info opens a popover anchored below the button; the close button
+  dismisses it. The popover shows file name (small dim text), size and
+  kind-specific details (lines/words for text, pages for PDF, pixels for
+  images, format/duration for audio/video, paragraphs/words for docx,
+  slides/words for pptx, sheets/grid for xlsx).
 
 ```rust
 let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
@@ -133,6 +137,27 @@ Don't Save). The dialog is the native GTK file chooser.
 | `---` | Rule line |
 
 Edit mode always shows the raw Markdown source.
+
+## Info Popover
+
+The info button (far right `info.circle` icon) opens a popover anchored
+below the button with file details. The popover has a close button
+(X) in the top-right corner and auto-hides when clicking outside.
+
+| Kind | Fields shown |
+|---|---|
+| Text / Markdown | File name, size, lines, words |
+| PDF | File name, size, pages |
+| Image | File name, size, pixels (W x H) |
+| Audio | File name, size, format, duration |
+| Video | File name, size, format, resolution, duration |
+| Document | File name, size, format, paragraphs, words |
+| Presentation | File name, size, format, slides, words |
+| Spreadsheet | File name, size, format, sheets, grid (C x R) |
+| Unsupported | File name, size |
+
+Labels use dim text; values are right-aligned and truncate with `...`
+when too long. The popover content is rebuilt each time it opens.
 
 ## Edit Mode and Manual Save
 

@@ -207,6 +207,7 @@ struct Widgets {
   sheet_grid: gtk::Grid,
   sheet_hint_lbl: gtk::Label,
   sheet_error_lbl: gtk::Label,
+  info_popover: gtk::Popover,
   root: gtk::Box,
 }
 
@@ -351,6 +352,14 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   tb_zoom_in.set_tooltip_text(Some(&lang::t("pdf.zoom_in")));
   tb_zoom_out.set_tooltip_text(Some(&lang::t("pdf.zoom_out")));
   tb_info.set_tooltip_text(Some(&lang::t("action.info")));
+
+  // Info popover: anchored below the info button, shows file details.
+  let info_popover = gtk::Popover::new();
+  info_popover.set_parent(&tb_info);
+  info_popover.set_position(gtk::PositionType::Bottom);
+  info_popover.set_has_arrow(true);
+  info_popover.set_autohide(true);
+
   root.append(&header);
 
   // Content stack: empty / text / unsupported. Same 16px side
@@ -959,6 +968,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     sheet_grid: sheet_grid.clone(),
     sheet_hint_lbl: sheet_hint_lbl.clone(),
     sheet_error_lbl: sheet_error_lbl.clone(),
+    info_popover: info_popover.clone(),
     root: root.clone(),
   });
 
@@ -1081,7 +1091,21 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let widgets = widgets.clone();
     tb_zoom_out.connect_clicked(move |_| toolbar_zoom(&state, &widgets, false));
   }
-  // Share, annotate and info stay inert for now (no action wired).
+  // Share and annotate stay inert for now (no action wired).
+  // Info button toggles the file info popover.
+  {
+    let state = state.clone();
+    let widgets = widgets.clone();
+    tb_info.connect_clicked(move |_| {
+      refresh_info_popover(&state, &widgets);
+      let popover = &widgets.info_popover;
+      if popover.is_visible() {
+        popover.popdown();
+      } else {
+        popover.popup();
+      }
+    });
+  }
 
   // Edit / Done toggle.
   {
@@ -1926,6 +1950,160 @@ fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
 /// changes on manual save.
 fn sync_preview_from_edit(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>, _saved_only: bool) {
   let _ = (state, widgets);
+}
+
+/// Build a single info row: a dim label on the left and a value label on
+/// the right, packed into a horizontal box.
+fn info_row(container: &gtk::Box, label_text: &str, value_text: &str) {
+  let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+  row.set_margin_top(2);
+  row.set_margin_bottom(2);
+  let lbl = gtk::Label::new(Some(label_text));
+  lbl.set_halign(gtk::Align::Start);
+  lbl.add_css_class("dim-label");
+  lbl.set_width_chars(14);
+  let val = gtk::Label::new(Some(value_text));
+  val.set_halign(gtk::Align::End);
+  val.set_hexpand(true);
+  val.set_ellipsize(gtk::pango::EllipsizeMode::End);
+  val.set_max_width_chars(30);
+  row.append(&lbl);
+  row.append(&val);
+  container.append(&row);
+}
+
+/// Refresh the info popover content from the current state.
+fn refresh_info_popover(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
+  let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  content.set_margin_start(12);
+  content.set_margin_end(12);
+  content.set_margin_top(8);
+  content.set_margin_bottom(8);
+  content.set_width_request(280);
+
+  // Header row: "Info" title plus close button.
+  let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+  let hdr = gtk::Label::new(Some(&lang::t("action.info")));
+  hdr.set_hexpand(true);
+  hdr.set_halign(gtk::Align::Start);
+  hdr.add_css_class("title-2");
+  let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
+  close_btn.set_has_frame(false);
+  let popover_weak = widgets.info_popover.downgrade();
+  close_btn.connect_clicked(move |_| {
+    if let Some(p) = popover_weak.upgrade() {
+      p.popdown();
+    }
+  });
+  header_row.append(&hdr);
+  header_row.append(&close_btn);
+  content.append(&header_row);
+
+  // Separator.
+  let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+  sep.set_margin_top(6);
+  sep.set_margin_bottom(6);
+  content.append(&sep);
+
+  // Info rows based on file kind.
+  let st = state.borrow();
+  if let Some(path) = st.path.as_ref() {
+    let full_name = path
+      .file_name()
+      .and_then(|n| n.to_str())
+      .unwrap_or("");
+    let size_str = path
+      .metadata()
+      .map(|m| model::format_file_size(m.len()))
+      .unwrap_or_default();
+
+    match st.kind {
+      FileKind::Text | FileKind::Markdown => {
+        let lines = st.content.lines().count().max(1);
+        let words: usize = st.content.split_whitespace().count();
+        info_row(&content, &lang::t("info.file_name"), full_name);
+        info_row(&content, &lang::t("info.size"), &size_str);
+        info_row(&content, &lang::t("info.lines"), &lines.to_string());
+        info_row(&content, &lang::t("info.words"), &words.to_string());
+      }
+      FileKind::Pdf => {
+        let pages = st.pdf.as_ref().map(|d| d.page_count()).unwrap_or(0);
+        info_row(&content, &lang::t("info.file_name"), full_name);
+        info_row(&content, &lang::t("info.size"), &size_str);
+        info_row(&content, &lang::t("info.pages"), &pages.to_string());
+      }
+      FileKind::Image => {
+        if let Some(meta) = st.img_meta.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          if meta.has_dimensions() {
+            let dims = format!("{} x {}", meta.width, meta.height);
+            info_row(&content, &lang::t("info.pixels"), &dims);
+          }
+        }
+      }
+      FileKind::Audio => {
+        if let Some(meta) = st.audio_meta.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          info_row(&content, &lang::t("info.format"), &meta.format);
+          if let Some(dur) = audio_known_duration(&st) {
+            info_row(&content, &lang::t("info.duration"), &model::format_audio_time(dur));
+          }
+        }
+      }
+      FileKind::Video => {
+        if let Some(meta) = st.video_meta.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          info_row(&content, &lang::t("info.format"), &meta.format);
+          if let Some((w, h)) = meta.resolution {
+            info_row(&content, &lang::t("info.resolution"), &format!("{w} x {h}"));
+          }
+          if let Some(dur) = video_known_duration(&st) {
+            info_row(&content, &lang::t("info.duration"), &model::format_audio_time(dur));
+          }
+        }
+      }
+      FileKind::Document => {
+        if let Some(doc) = st.doc_doc.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          info_row(&content, &lang::t("info.format"), &doc.format);
+          info_row(&content, &lang::t("info.paragraphs"), &doc.paragraph_count().to_string());
+          info_row(&content, &lang::t("info.words"), &doc.word_count().to_string());
+        }
+      }
+      FileKind::Presentation => {
+        if let Some(deck) = st.pres_deck.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          info_row(&content, &lang::t("info.format"), &deck.format);
+          info_row(&content, &lang::t("info.slides"), &deck.slide_count().to_string());
+          info_row(&content, &lang::t("info.words"), &deck.word_count().to_string());
+        }
+      }
+      FileKind::Spreadsheet => {
+        if let Some(book) = st.sheet_book.as_ref() {
+          info_row(&content, &lang::t("info.file_name"), full_name);
+          info_row(&content, &lang::t("info.size"), &size_str);
+          info_row(&content, &lang::t("info.format"), &book.format);
+          info_row(&content, &lang::t("info.sheets"), &book.sheet_count().to_string());
+          let (rows, cols) = book.sheet_dims(st.sheet_index);
+          if rows > 0 || cols > 0 {
+            info_row(&content, &lang::t("info.grid"), &format!("{cols} x {rows}"));
+          }
+        }
+      }
+      FileKind::Unsupported => {
+        info_row(&content, &lang::t("info.file_name"), full_name);
+        info_row(&content, &lang::t("info.size"), &size_str);
+      }
+    }
+  }
+  drop(st);
+
+  widgets.info_popover.set_child(Some(&content));
 }
 
 fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {

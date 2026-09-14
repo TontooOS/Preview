@@ -67,5 +67,18 @@
   "xlsx.load_failed": "Cannot open this spreadsheet: %reason%",
   "xlsx.truncated": "Large sheet: showing the first %rows% rows and %cols% columns",
   "xlsx.empty_sheet": "This sheet contains no data.",
-  "status.xlsx": "%format%, %sheets% sheets, %rows%, %size%, read-only"
+  "status.xlsx": "%format%, %sheets% sheets, %rows%, %size%, read-only",
+  "info.file_name": "File Name",
+  "info.size": "Size",
+  "info.lines": "Lines",
+  "info.words": "Words",
+  "info.pages": "Pages",
+  "info.pixels": "Pixels",
+  "info.format": "Format",
+  "info.duration": "Duration",
+  "info.resolution": "Resolution",
+  "info.paragraphs": "Paragraphs",
+  "info.slides": "Slides",
+  "info.sheets": "Sheets",
+  "info.grid": "Grid"
 }

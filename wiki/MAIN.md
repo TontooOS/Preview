@@ -48,6 +48,12 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Info button opens a popover with file details: file name,
+  size and kind-specific fields (lines/words for text, pages for PDF,
+  pixels for images, format/duration for audio/video, paragraphs/words
+  for docx, slides/words for pptx, sheets/grid for xlsx); close button
+  in the top-right corner. Lang keys `info.*` added to `en_us` and
+  `de_de`.
 - 2026-09-14: Header file name ellipsizes with `...` at the end, so the
   action buttons and toolbar stay visible at any window width.
 - 2026-09-14: Image fit mode always shows the whole picture: scrollbars
