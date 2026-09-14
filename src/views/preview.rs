@@ -314,7 +314,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   // Long file names truncate with "..." at the end instead of pushing
   // the action buttons and toolbar out of the window.
   title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-  title.add_css_class("title-1");
+  title.add_css_class("header-title");
   let subtitle = gtk::Label::new(Some(""));
   subtitle.set_visible(false);
   title_box.append(&title);
@@ -1393,6 +1393,7 @@ fn base_css() -> String {
      textview.mono {{ font-family: 'SF Mono', Monospace; }}\
      .dim-label {{ opacity: 0.6; }}\
      .title-1 {{ font-family: '{SF_PRO}'; font-size: 22pt; font-weight: 800; }}\
+     .header-title {{ font-family: '{SF_PRO}'; font-size: 19pt; font-weight: 700; }}\
      .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .preview-open-button {{ font-family: '{SF_PRO}'; font-size: 14pt; font-weight: 700; \
        padding: 10px 28px; border-radius: 999px; min-width: 220px; min-height: 48px; }}\
@@ -2133,13 +2134,14 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.edit_btn.set_label(&edit_label);
 
   // Header toolbar: open always works, zoom only for PDF/image pages,
-  // share, annotate and info stay inert for now.
+  // share and annotate stay inert for now, info only when a file is open.
   widgets.tb_open.set_sensitive(true);
   let zoomable = is_pdf || is_image;
   widgets.tb_zoom_in.set_sensitive(zoomable);
   widgets.tb_zoom_out.set_sensitive(zoomable);
   widgets.tb_share.set_sensitive(false);
   widgets.tb_annotate.set_sensitive(false);
+  widgets.tb_info.set_sensitive(has_file);
 
   let page = if !has_file {
     "empty"
