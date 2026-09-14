@@ -2,9 +2,13 @@
 
 TontooOS document viewer basis: a 939x692 window without a system
 decoration bar (traffic lights sit directly on the window), with a top
-row (`TrafficLights` plus file name, `Edit`-`Done` / `Save` text actions
+row (`TrafficLights` plus file name shown only when a file is open,
+`Edit`-`Done` / `Save` text actions
 and a Finder-style `Toolbar` with open, zoom in, zoom out, share and
-annotate icons), an empty state with a centered open button, a text
+annotate icons), an empty state with a centered title, hint and a large
+pill-shaped open button (`.preview-open-button` with SF Pro Display,
+14pt bold, 10px vertical plus 28px horizontal padding, 999px radius,
+220x48 minimum size), a text
 viewer with line numbers on the left, and a Markdown mode with a
 rendered preview plus a raw edit mode.
 PDFs open read-only in a page viewer (see [Pdf.md](Pdf.md)).
@@ -25,9 +29,9 @@ binary garbage.
 
 From top to bottom the window contains:
 
-1. Top row: traffic lights directly on the window plus title plus subtitle on the left, `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
+1. Top row: traffic lights directly on the window plus title plus subtitle on the left (visible only when a file is open, so the empty state shows the title once in the center), `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
 2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
-3. Status line: line count and save state
+3. Status line: line count and save state (hidden when no file is open)
 
 Uniform frame: 16px from the content to the window edge on all four
 sides (header top, content sides, status bottom), 8px gaps between the

@@ -48,6 +48,11 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Empty state cleanup (header title plus subtitle and status
+  line stay hidden until a file is open, so the centered title and hint
+  show once); open button restyled as a large pill
+  (`.preview-open-button`, 220x48, 999px radius, SF Pro 14pt bold).
+
 - 2026-09-13: Pinned default window size via `force_size(939, 692)` so
   the half-monitor cap no longer shrinks the window; fit mode keeps the
   picture inside the viewport without explicit sizing (manual zoom

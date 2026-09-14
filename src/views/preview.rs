@@ -1,7 +1,8 @@
 //! Tahoe-style Preview root view.
 //!
-//! Header with `Preview` title plus file name, `Open` / `Edit`-`Done` /
-//! `Save` actions. Empty state with a centered open button. Text files
+//! Header with file name (visible only when a file is open), `Open` /
+//! `Edit`-`Done` / `Save` actions. Empty state with centered title, hint
+//! and a large pill-shaped open button. Text files
 //! render read-only with a rendered Markdown preview mode; edit mode
 //! shows raw text with line numbers on the left. PDFs open read-only in
 //! a page viewer (previous/next, page indicator, zoom, fit width). Images
@@ -118,6 +119,7 @@ impl State {
 
 #[allow(dead_code)]
 struct Widgets {
+  title_box: gtk::Box,
   title: gtk::Label,
   subtitle: gtk::Label,
   edit_btn: gtk::Button,
@@ -366,7 +368,10 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   empty_hint.set_justify(gtk::Justification::Center);
   let empty_open = gtk::Button::with_label(&lang::t("action.open_file"));
   empty_open.add_css_class("suggested-action");
+  empty_open.add_css_class("preview-open-button");
   empty_open.set_halign(gtk::Align::Center);
+  empty_open.set_size_request(220, 48);
+  empty_open.set_margin_top(8);
   empty_box.append(&empty_title);
   empty_box.append(&empty_hint);
   empty_box.append(&empty_open);
@@ -440,7 +445,10 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   unsup_hint.set_justify(gtk::Justification::Center);
   let unsup_open = gtk::Button::with_label(&lang::t("action.open_other"));
   unsup_open.add_css_class("suggested-action");
+  unsup_open.add_css_class("preview-open-button");
   unsup_open.set_halign(gtk::Align::Center);
+  unsup_open.set_size_request(220, 48);
+  unsup_open.set_margin_top(8);
   unsup_box.append(&unsup_title);
   unsup_box.append(&unsup_hint);
   unsup_box.append(&unsup_open);
@@ -863,6 +871,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   }
 
   let widgets = Rc::new(Widgets {
+    title_box: title_box.clone(),
     title,
     subtitle,
     edit_btn: edit_btn.clone(),
@@ -1361,6 +1370,10 @@ fn base_css() -> String {
      .dim-label {{ opacity: 0.6; }}\
      .title-1 {{ font-family: '{SF_PRO}'; font-size: 22pt; font-weight: 800; }}\
      .title-2 {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .preview-open-button {{ font-family: '{SF_PRO}'; font-size: 14pt; font-weight: 700; \
+       padding: 10px 28px; border-radius: 999px; min-width: 220px; min-height: 48px; }}\
+     .preview-open-button:hover {{ opacity: 0.92; }}\
+     .preview-open-button:active {{ opacity: 0.85; }}\
      .audio-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .audio-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
      .video-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
@@ -1931,9 +1944,9 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
     let name = model::display_name(path);
     widgets.title.set_text(&name);
     widgets.subtitle.set_text(&path.display().to_string());
+    widgets.title_box.set_visible(true);
   } else {
-    widgets.title.set_text(&lang::t("app.title"));
-    widgets.subtitle.set_text(&lang::t("empty.hint"));
+    widgets.title_box.set_visible(false);
   }
 
   widgets.edit_btn.set_visible(editable);
@@ -1956,7 +1969,7 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.tb_annotate.set_sensitive(false);
 
   if !has_file {
-    widgets.status.set_text(&lang::t("status.empty"));
+    widgets.status.set_visible(false);
   } else if st.kind == FileKind::Unsupported {
     widgets.status.set_text(&lang::t("status.unsupported"));
   } else if is_pdf {
@@ -2012,6 +2025,9 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
       key,
       &[("lines", &lines.to_string())],
     ));
+  }
+  if has_file {
+    widgets.status.set_visible(true);
   }
 
   let page = if !has_file {
