@@ -2084,12 +2084,25 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   };
   widgets.edit_btn.set_label(&edit_label);
 
-  // Header toolbar: open always works, zoom only for PDF/image pages,
-  // share and annotate stay inert for now, info only when a file is open.
+  // Header toolbar: open always works, zoom only for PDF/image pages
+  // (greyed out when at min/max), share and annotate stay inert for now,
+  // info only when a file is open.
   widgets.tb_open.set_sensitive(true);
   let zoomable = is_pdf || is_image;
-  widgets.tb_zoom_in.set_sensitive(zoomable);
-  widgets.tb_zoom_out.set_sensitive(zoomable);
+  if zoomable {
+    if is_pdf {
+      let z = st.pdf_zoom;
+      widgets.tb_zoom_in.set_sensitive(z < 3.0);
+      widgets.tb_zoom_out.set_sensitive(z > 0.5);
+    } else {
+      let z = st.img_zoom;
+      widgets.tb_zoom_in.set_sensitive(z < model::MAX_IMAGE_ZOOM);
+      widgets.tb_zoom_out.set_sensitive(z > model::MIN_IMAGE_ZOOM);
+    }
+  } else {
+    widgets.tb_zoom_in.set_sensitive(false);
+    widgets.tb_zoom_out.set_sensitive(false);
+  }
   widgets.tb_share.set_sensitive(false);
   widgets.tb_annotate.set_sensitive(false);
   widgets.tb_info.set_sensitive(has_file);
