@@ -145,8 +145,6 @@ struct Widgets {
   prev_btn: gtk::Button,
   next_btn: gtk::Button,
   page_label: gtk::Label,
-  zoom_out_btn: gtk::Button,
-  zoom_in_btn: gtk::Button,
   fit_btn: gtk::ToggleButton,
   pdf_scroll: gtk::ScrolledWindow,
   pdf_view: gtk::TextView,
@@ -154,8 +152,6 @@ struct Widgets {
   pdf_error: gtk::Label,
   pdf_css: gtk::CssProvider,
   img_bar: gtk::Box,
-  img_zoom_out_btn: gtk::Button,
-  img_zoom_in_btn: gtk::Button,
   img_fit_btn: gtk::ToggleButton,
   img_scroll: gtk::ScrolledWindow,
   img_picture: gtk::Picture,
@@ -481,19 +477,18 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pdf_bar.set_margin_top(8);
   pdf_bar.set_margin_bottom(8);
   let prev_btn = gtk::Button::with_label(&lang::t("pdf.prev"));
+  prev_btn.add_css_class("nav-btn");
   let page_label = gtk::Label::new(Some(""));
   page_label.set_hexpand(true);
   page_label.add_css_class("dim-label");
   let next_btn = gtk::Button::with_label(&lang::t("pdf.next"));
-  let zoom_out_btn = gtk::Button::with_label(&lang::t("pdf.zoom_out"));
-  let zoom_in_btn = gtk::Button::with_label(&lang::t("pdf.zoom_in"));
+  next_btn.add_css_class("nav-btn");
   let fit_btn = gtk::ToggleButton::with_label(&lang::t("pdf.fit"));
+  fit_btn.add_css_class("nav-btn");
   fit_btn.set_active(true);
   pdf_bar.append(&prev_btn);
   pdf_bar.append(&page_label);
   pdf_bar.append(&next_btn);
-  pdf_bar.append(&zoom_out_btn);
-  pdf_bar.append(&zoom_in_btn);
   pdf_bar.append(&fit_btn);
   pdf_box.append(&pdf_bar);
   let pdf_buffer = gtk::TextBuffer::new(None);
@@ -536,12 +531,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   img_bar.set_margin_top(8);
   img_bar.set_margin_bottom(8);
   img_bar.set_halign(gtk::Align::Center);
-  let img_zoom_out_btn = gtk::Button::with_label(&lang::t("image.zoom_out"));
-  let img_zoom_in_btn = gtk::Button::with_label(&lang::t("image.zoom_in"));
   let img_fit_btn = gtk::ToggleButton::with_label(&lang::t("image.fit"));
+  img_fit_btn.add_css_class("nav-btn");
   img_fit_btn.set_active(true);
-  img_bar.append(&img_zoom_out_btn);
-  img_bar.append(&img_zoom_in_btn);
   img_bar.append(&img_fit_btn);
   // Kept alive for state (fit toggle) but never shown: zoom runs
   // through the header toolbar icons.
@@ -746,10 +738,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pres_bar.set_margin_top(8);
   pres_bar.set_margin_bottom(8);
   let pres_prev_btn = gtk::Button::with_label(&lang::t("pptx.prev"));
+  pres_prev_btn.add_css_class("nav-btn");
   let pres_label = gtk::Label::new(Some(""));
   pres_label.set_hexpand(true);
   pres_label.add_css_class("dim-label");
   let pres_next_btn = gtk::Button::with_label(&lang::t("pptx.next"));
+  pres_next_btn.add_css_class("nav-btn");
   pres_bar.append(&pres_prev_btn);
   pres_bar.append(&pres_label);
   pres_bar.append(&pres_next_btn);
@@ -804,10 +798,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   sheet_bar.set_margin_top(8);
   sheet_bar.set_margin_bottom(8);
   let sheet_prev_btn = gtk::Button::with_label(&lang::t("xlsx.prev"));
+  sheet_prev_btn.add_css_class("nav-btn");
   let sheet_label = gtk::Label::new(Some(""));
   sheet_label.set_hexpand(true);
   sheet_label.add_css_class("dim-label");
   let sheet_next_btn = gtk::Button::with_label(&lang::t("xlsx.next"));
+  sheet_next_btn.add_css_class("nav-btn");
   sheet_bar.append(&sheet_prev_btn);
   sheet_bar.append(&sheet_label);
   sheet_bar.append(&sheet_next_btn);
@@ -906,8 +902,6 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     prev_btn: prev_btn.clone(),
     next_btn: next_btn.clone(),
     page_label: page_label.clone(),
-    zoom_out_btn: zoom_out_btn.clone(),
-    zoom_in_btn: zoom_in_btn.clone(),
     fit_btn: fit_btn.clone(),
     pdf_scroll: pdf_scroll.clone(),
     pdf_view: pdf_view.clone(),
@@ -915,8 +909,6 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     pdf_error: pdf_error.clone(),
     pdf_css: pdf_css.clone(),
     img_bar: img_bar.clone(),
-    img_zoom_out_btn: img_zoom_out_btn.clone(),
-    img_zoom_in_btn: img_zoom_in_btn.clone(),
     img_fit_btn: img_fit_btn.clone(),
     img_scroll: img_scroll.clone(),
     img_picture: img_picture.clone(),
@@ -1202,25 +1194,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
-  // PDF zoom: font scale steps plus fit-width toggle.
-  {
-    let state = state.clone();
-    let widgets = widgets.clone();
-    zoom_in_btn.connect_clicked(move |_| {
-      let zoom = (state.borrow().pdf_zoom + 0.25).min(3.0);
-      state.borrow_mut().pdf_zoom = zoom;
-      apply_pdf_zoom(&state, &widgets);
-    });
-  }
-  {
-    let state = state.clone();
-    let widgets = widgets.clone();
-    zoom_out_btn.connect_clicked(move |_| {
-      let zoom = (state.borrow().pdf_zoom - 0.25).max(0.5);
-      state.borrow_mut().pdf_zoom = zoom;
-      apply_pdf_zoom(&state, &widgets);
-    });
-  }
+  // PDF fit-width toggle (zoom runs through the header toolbar icons).
   {
     let state = state.clone();
     let widgets = widgets.clone();
@@ -1230,36 +1204,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     });
   }
 
-  // Image zoom: factor steps plus fit-window toggle. Manual zoom leaves
-  // fit mode; enabling fit scales the picture into the current viewport.
-  {
-    let state = state.clone();
-    let widgets = widgets.clone();
-    img_zoom_in_btn.connect_clicked(move |_| {
-      if state.borrow().img_fit {
-        sync_image_fit_factor(&state, &widgets);
-      }
-      let zoom = model::image_zoom_in(state.borrow().img_zoom);
-      state.borrow_mut().img_zoom = zoom;
-      state.borrow_mut().img_fit = false;
-      widgets.img_fit_btn.set_active(false);
-      apply_image_zoom(&state, &widgets);
-    });
-  }
-  {
-    let state = state.clone();
-    let widgets = widgets.clone();
-    img_zoom_out_btn.connect_clicked(move |_| {
-      if state.borrow().img_fit {
-        sync_image_fit_factor(&state, &widgets);
-      }
-      let zoom = model::image_zoom_out(state.borrow().img_zoom);
-      state.borrow_mut().img_zoom = zoom;
-      state.borrow_mut().img_fit = false;
-      widgets.img_fit_btn.set_active(false);
-      apply_image_zoom(&state, &widgets);
-    });
-  }
+  // Image fit-window toggle (zoom runs through the header toolbar icons).
   {
     let state = state.clone();
     let widgets = widgets.clone();
@@ -1405,7 +1350,13 @@ fn base_css() -> String {
      .video-time {{ font-family: '{SF_PRO}'; font-size: 11pt; }}\
      .docx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
      .pptx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
-     .xlsx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}"
+     .xlsx-title {{ font-family: '{SF_PRO}'; font-size: 16pt; font-weight: 700; }}\
+     .nav-btn {{ font-family: '{SF_PRO}'; font-size: 12pt; font-weight: 600; \
+       padding: 6px 14px; border-radius: 8px; min-height: 28px; \
+       background: rgba(128,128,128,0.12); border: none; color: inherit; }}\
+     .nav-btn:hover {{ background: rgba(128,128,128,0.22); }}\
+     .nav-btn:active {{ background: rgba(128,128,128,0.30); }}\
+     .nav-btn:checked {{ background: rgba(10,132,255,0.25); }}"
   )
 }
 
