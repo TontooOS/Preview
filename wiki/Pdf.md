@@ -99,7 +99,8 @@ no-op for PDFs.
 | `Zoom Out` / `Zoom In` | `pdf.zoom_out` / `pdf.zoom_in` | Font scale in 0.25 steps, clamped to 0.5–3.0 |
 | `Fit Width` | `pdf.fit` | Toggle between wrapped (fit) and unwrapped text |
 
-The status line shows `%count% pages, read-only` (`status.pdf`). The
+There is no bottom status line; page count is visible in the page
+indicator. The
 window follows the live system color scheme (Dark `#1d1d1d`, Light
 `#ececec`) via `app.auto_color_scheme()`; no background is hardcoded.
 

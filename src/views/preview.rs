@@ -129,7 +129,7 @@ struct Widgets {
   tb_zoom_out: gtk::Button,
   tb_share: gtk::Button,
   tb_annotate: gtk::Button,
-  status: gtk::Label,
+  tb_info: gtk::Button,
   stack: gtk::Stack,
   text_stack: gtk::Stack,
   edit_view: gtk::TextView,
@@ -287,7 +287,7 @@ impl crate::UIKit::widget::Widget for PreviewRoot {
 fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   let state = Rc::new(RefCell::new(State::empty()));
 
-  // Root column: header, content stack, status line.
+  // Root column: header plus content stack (no status line).
   let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
   // Top row: traffic lights directly on the window (no decoration bar),
@@ -325,13 +325,14 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
 
   // Icon toolbar on the far right (Finder-style TontooUI element):
   // open document, zoom in, zoom out, share (no action yet),
-  // annotate (no action yet).
+  // annotate (no action yet), info on the far right (no action yet).
   let toolbar = Toolbar::new()
     .item(ToolbarItem::new("doc.badge.arrow.up.fill"))
     .item(ToolbarItem::new("plus.magnifyingglass"))
     .item(ToolbarItem::new("minus.magnifyingglass"))
     .item(ToolbarItem::new("square.and.arrow.up.fill"))
-    .item(ToolbarItem::new("square.and.pencil"));
+    .item(ToolbarItem::new("square.and.pencil"))
+    .item(ToolbarItem::new("info.circle"));
   let toolbar_gtk = toolbar.to_gtk();
   toolbar_gtk.set_valign(gtk::Align::Center);
   header.append(&toolbar_gtk);
@@ -341,13 +342,15 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   let tb_zoom_out = tb_buttons.get(2).cloned().unwrap_or_else(gtk::Button::new);
   let tb_share = tb_buttons.get(3).cloned().unwrap_or_else(gtk::Button::new);
   let tb_annotate = tb_buttons.get(4).cloned().unwrap_or_else(gtk::Button::new);
+  let tb_info = tb_buttons.get(5).cloned().unwrap_or_else(gtk::Button::new);
   tb_open.set_tooltip_text(Some(&lang::t("action.open")));
   tb_zoom_in.set_tooltip_text(Some(&lang::t("pdf.zoom_in")));
   tb_zoom_out.set_tooltip_text(Some(&lang::t("pdf.zoom_out")));
+  tb_info.set_tooltip_text(Some(&lang::t("action.info")));
   root.append(&header);
 
   // Content stack: empty / text / unsupported. Same 16px side
-  // distance as header and status so the frame is uniform.
+  // distance as the header so the frame is uniform.
   let stack = gtk::Stack::new();
   stack.set_hexpand(true);
   stack.set_vexpand(true);
@@ -847,16 +850,9 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
 
   root.append(&stack);
 
-  // Status line. Uniform frame: 16px to the bottom window edge,
-  // 8px gap to the content above.
-  let status = gtk::Label::new(Some(""));
-  status.set_halign(gtk::Align::Start);
-  status.add_css_class("dim-label");
-  status.set_margin_start(16);
-  status.set_margin_end(16);
-  status.set_margin_top(8);
-  status.set_margin_bottom(16);
-  root.append(&status);
+  // No status line: the content stack ends with an 8px gap plus the
+  // 16px bottom margin below.
+  stack.set_margin_bottom(16);
 
   apply_css(&root);
   // Dedicated display provider for the PDF zoom level (higher priority
@@ -881,7 +877,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     tb_zoom_out: tb_zoom_out.clone(),
     tb_share: tb_share.clone(),
     tb_annotate: tb_annotate.clone(),
-    status,
+    tb_info: tb_info.clone(),
     stack: stack.clone(),
     text_stack: text_stack.clone(),
     edit_view: edit_view.clone(),
@@ -1081,7 +1077,7 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let widgets = widgets.clone();
     tb_zoom_out.connect_clicked(move |_| toolbar_zoom(&state, &widgets, false));
   }
-  // Share and annotate stay inert for now (no action wired).
+  // Share, annotate and info stay inert for now (no action wired).
 
   // Edit / Done toggle.
   {
@@ -1916,7 +1912,7 @@ fn do_save(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
       refresh_body(state, widgets);
     }
     Err(reason) => {
-      widgets.status.set_text(&lang::t_with("status.save_failed", &[("reason", &reason)]));
+      let _ = reason;
     }
   }
 }
@@ -1934,11 +1930,6 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   let editable = has_file && (st.kind == FileKind::Text || st.kind == FileKind::Markdown);
   let is_pdf = has_file && st.kind == FileKind::Pdf;
   let is_image = has_file && st.kind == FileKind::Image;
-  let is_audio = has_file && st.kind == FileKind::Audio;
-  let is_video = has_file && st.kind == FileKind::Video;
-  let is_doc = has_file && st.kind == FileKind::Document;
-  let is_pres = has_file && st.kind == FileKind::Presentation;
-  let is_sheet = has_file && st.kind == FileKind::Spreadsheet;
 
   if let Some(path) = st.path.as_ref() {
     let name = model::display_name(path);
@@ -1960,75 +1951,13 @@ fn refresh_chrome(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.edit_btn.set_label(&edit_label);
 
   // Header toolbar: open always works, zoom only for PDF/image pages,
-  // share and annotate stay inert for now.
+  // share, annotate and info stay inert for now.
   widgets.tb_open.set_sensitive(true);
   let zoomable = is_pdf || is_image;
   widgets.tb_zoom_in.set_sensitive(zoomable);
   widgets.tb_zoom_out.set_sensitive(zoomable);
   widgets.tb_share.set_sensitive(false);
   widgets.tb_annotate.set_sensitive(false);
-
-  if !has_file {
-    widgets.status.set_visible(false);
-  } else if st.kind == FileKind::Unsupported {
-    widgets.status.set_text(&lang::t("status.unsupported"));
-  } else if is_pdf {
-    match st.pdf.as_ref() {
-      Some(doc) => widgets.status.set_text(&lang::t_with(
-        "status.pdf",
-        &[("count", &doc.page_count().to_string())],
-      )),
-      None => widgets.status.set_text(&lang::t("status.unsupported")),
-    }
-  } else if is_image {
-    match st.img_meta.as_ref() {
-      Some(meta) if meta.has_dimensions() => {
-        let mut text = lang::t_with(
-          "status.image",
-          &[
-            ("width", &meta.width.to_string()),
-            ("height", &meta.height.to_string()),
-            ("size", &model::format_file_size(meta.file_bytes)),
-          ],
-        );
-        if meta.downscaled {
-          text.push_str(&format!(" ({})", lang::t("image.downscaled")));
-        }
-        widgets.status.set_text(&text);
-      }
-      Some(meta) => widgets.status.set_text(&lang::t_with(
-        "status.image_unknown",
-        &[("size", &model::format_file_size(meta.file_bytes))],
-      )),
-      None => {
-        let reason = st.img_error.clone().unwrap_or_else(|| lang::t("unsupported.hint"));
-        widgets.status.set_text(&lang::t_with(
-          "image.load_failed",
-          &[("reason", &reason)],
-        ));
-      }
-    }
-  } else if is_audio {
-    widgets.status.set_text(&audio_status_text(&st));
-  } else if is_video {
-    widgets.status.set_text(&video_status_text(&st));
-  } else if is_doc {
-    widgets.status.set_text(&doc_status_text(&st));
-  } else if is_pres {
-    widgets.status.set_text(&pres_status_text(&st));
-  } else if is_sheet {
-    widgets.status.set_text(&sheet_status_text(&st));
-  } else {
-    let lines = st.content.lines().count().max(1);
-    let key = if st.dirty { "status.dirty" } else { "status.saved" };
-    widgets.status.set_text(&lang::t_with(
-      key,
-      &[("lines", &lines.to_string())],
-    ));
-  }
-  if has_file {
-    widgets.status.set_visible(true);
-  }
 
   let page = if !has_file {
     "empty"
@@ -2558,7 +2487,6 @@ fn update_audio_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   }
   let status = audio_status_text(&state.borrow());
   widgets.audio_info.set_text(&status);
-  widgets.status.set_text(&status);
 }
 
 /// Stop video playback, drop the stream plus its timer tick and detach the
@@ -2751,7 +2679,6 @@ fn update_video_ui(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   }
   let status = video_status_text(&state.borrow());
   widgets.video_info.set_text(&status);
-  widgets.status.set_text(&status);
 }
 
 /// Status line for documents: format, paragraph and word counts plus file

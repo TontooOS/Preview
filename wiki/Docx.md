@@ -151,7 +151,7 @@ no-op for documents.
 | Tables | — | Plain `a \| b` grid rows with a dim separator |
 | Truncated | `docx.truncated` | Dim `Large document: showing the first %count% blocks` line at the end |
 
-The status line shows the same text as the info line. The window follows
+There is no bottom status line. The window follows
 the live system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 `app.auto_color_scheme()`; no background is hardcoded.
 

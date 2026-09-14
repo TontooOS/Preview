@@ -162,9 +162,10 @@ no-op for audio.
 | `elapsed / total` | `audio.position` | `%elapsed% / %total%`, unknown total shows `--:--` |
 | Volume slider | `audio.volume` | 0..100 percent, applied to the stream immediately |
 
-The status line shows `%format%, %duration%, %size%, read-only`
-(`status.audio`), e.g. `MP3, 3:25, 4.1 MB, read-only`. The info line on
-the page shows the same text. The window follows the live system color
+The info line on the page shows `%format%, %duration%, %size%,
+read-only`
+(`status.audio`), e.g. `MP3, 3:25, 4.1 MB, read-only`. There is no
+bottom status line. The window follows the live system color
 scheme (Dark `#1d1d1d`, Light `#ececec`) via `app.auto_color_scheme()`;
 no background is hardcoded.
 

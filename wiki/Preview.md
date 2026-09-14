@@ -4,8 +4,8 @@ TontooOS document viewer basis: a 939x692 window without a system
 decoration bar (traffic lights sit directly on the window), with a top
 row (`TrafficLights` plus file name shown only when a file is open,
 `Edit`-`Done` / `Save` text actions
-and a Finder-style `Toolbar` with open, zoom in, zoom out, share and
-annotate icons), an empty state with a centered title, hint and a large
+and a Finder-style `Toolbar` with open, zoom in, zoom out, share,
+annotate and info icons), an empty state with a centered title, hint and a large
 pill-shaped open button (`.preview-open-button` with SF Pro Display,
 14pt bold, 10px vertical plus 28px horizontal padding, 999px radius,
 220x48 minimum size), a text
@@ -30,12 +30,11 @@ binary garbage.
 From top to bottom the window contains:
 
 1. Top row: traffic lights directly on the window plus file name only on the left (no path, visible only when a file is open, so the empty state shows the title once in the center), `Edit`-`Done` / `Save` plus a `Toolbar` on the right (no decoration bar, no separator)
-2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page
-3. Status line: line count and save state (hidden when no file is open)
+2. Content stack: empty, text (edit/preview), pdf, image, audio, video, docx, pptx, xlsx, or unsupported page (no status line below)
 
 Uniform frame: 16px from the content to the window edge on all four
-sides (header top, content sides, status bottom), 8px gaps between the
-sections.
+sides (header top, content sides, content bottom), 8px gap between the
+header and the content.
 
 ## Header Toolbar
 
@@ -48,6 +47,7 @@ Finder-style `Toolbar` (`TontooUI`) on the far right of the top row:
 | `minus.magnifyingglass` | Zooms out (PDF font scale, image pixbuf scale) |
 | `square.and.arrow.up.fill` | No action yet (inert, insensitive) |
 | `square.and.pencil` | No action yet (inert, insensitive) |
+| `info.circle` | No action yet (far right, inert) |
 
 Rules:
 
@@ -55,6 +55,7 @@ Rules:
   text button.
 - Zoom icons are sensitive only for PDF and image pages.
 - Share and annotate stay insensitive until wired.
+- Info sits far right and does nothing yet.
 
 ```rust
 let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
@@ -146,8 +147,8 @@ Preview mode is read-only.
 | `Ctrl+S` | Same as `Save` (global shortcut) |
 | Window close | Dirty files get Cancel / Save / Don't Save |
 
-There is no autosave: the status line shows `%lines% lines` when saved
-and `%lines% lines, unsaved changes` when dirty. Leaving edit mode with
+There is no autosave: the `Save` button is sensitive only when the
+buffer has unsaved changes. Leaving edit mode with
 unsaved changes keeps the buffer; Markdown preview renders the current
 buffer so the change is visible immediately.
 

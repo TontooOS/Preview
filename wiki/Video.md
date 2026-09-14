@@ -158,10 +158,10 @@ controls are only visible for video; `Edit` and `Save` are hidden and
 | `elapsed / total` | `video.position` | `%elapsed% / %total%`, unknown total shows `--:--` |
 | Volume slider | `video.volume` | 0..100 percent, applied to the stream immediately |
 
-The status line shows `%format%, %resolution%%duration%, %size%,
+The info line on the page shows `%format%, %resolution%%duration%, %size%,
 read-only` (`status.video`), e.g. `MP4, 640 x 480, 1:05, 4.1 MB,
-read-only` (resolution is empty when unknown). The info line on the page
-shows the same text. The window follows the live system color scheme (Dark
+read-only` (resolution is empty when unknown). There is no bottom status
+line. The window follows the live system color scheme (Dark
 `#1d1d1d`, Light `#ececec`) via `app.auto_color_scheme()`; no background
 is hardcoded.
 

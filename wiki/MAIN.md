@@ -48,6 +48,10 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Removed the bottom status line (no more pixel/size and
+  read-only text); header toolbar gains a far-right `info.circle` icon
+  with no action yet (`action.info` in `lang/en_us.json` and
+  `lang/de_de.json`).
 - 2026-09-14: Header shows the file name only (full path subtitle
   removed for all kinds); header and status line stay hidden until a
   file is open.

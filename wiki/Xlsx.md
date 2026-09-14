@@ -176,7 +176,7 @@ spreadsheets. Navigation mirrors the presentation toolbar pattern
 | Empty | `xlsx.empty_sheet` | Dim `This sheet contains no data.` line for sheets without cells |
 | Truncated | `xlsx.truncated` | Dim `Large sheet: showing the first %rows% rows and %cols% columns` line |
 
-The status line shows the same text as the info line. The window follows
+There is no bottom status line. The window follows
 the live system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 `app.auto_color_scheme()`; no background is hardcoded.
 

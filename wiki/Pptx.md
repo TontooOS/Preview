@@ -162,7 +162,7 @@ mirrors the PDF page toolbar pattern (previous/next plus indicator).
 | Notes | `pptx.notes` | Dim `Notes` section below the slide body |
 | Truncated | `pptx.truncated` | Dim `Large deck: showing the first %count% slides` line on the last slide |
 
-The status line shows the same text as the info line. The window follows
+There is no bottom status line. The window follows
 the live system color scheme (Dark `#1d1d1d`, Light `#ececec`) via
 `app.auto_color_scheme()`; no background is hardcoded.
 

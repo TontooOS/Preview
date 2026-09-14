@@ -114,9 +114,8 @@ pub fn display_size(width: u32, height: u32) -> (u32, u32);
 ```
 
 Scales dimensions down so the longest side fits 2048 pixels, preserving
-the aspect ratio. Smaller images keep their size. The status line shows
-the original dimensions plus the `image.downscaled` note when scaling
-applied.
+the aspect ratio. Smaller images keep their size. There is no bottom
+status line; dimensions are not shown below the picture.
 
 ### parse_svg_size
 
@@ -171,10 +170,7 @@ manual zoom sets an explicit size.
 |---|---|---|
 | Header `plus.magnifyingglass` / `minus.magnifyingglass` | `pdf.zoom_in` / `pdf.zoom_out` (tooltips) | Factor in 0.25 steps, clamped to 0.1–8.0, leaves fit mode |
 
-The status line shows `%width% x %height%, %size%, read-only`
-(`status.image`), plus the `image.downscaled` note for huge images, or
-`%size%, read-only` (`status.image_unknown`) when SVG dimensions are
-unknown. The window follows the live system color scheme (Dark `#1d1d1d`,
+There is no bottom status line. The window follows the live system color scheme (Dark `#1d1d1d`,
 Light `#ececec`) via `app.auto_color_scheme()`; no background is
 hardcoded.
 

@@ -7,6 +7,7 @@
   "action.edit": "Edit",
   "action.done": "Done",
   "action.save": "Save",
+  "action.info": "Info",
   "dialog.open_title": "Open File",
   "unsupported.title": "Unsupported file",
   "unsupported.hint": "This format is not supported yet",
