@@ -48,6 +48,9 @@ See [Preview.md](Preview.md) for details.
 
 ## Changelog
 
+- 2026-09-14: Image fit mode always shows the whole picture: scrollbars
+  stay off in fit mode so the image scales into the visible window area
+  on every resize; manual zoom re-enables scrolling.
 - 2026-09-14: Removed the bottom status line (no more pixel/size and
   read-only text); header toolbar gains a far-right `info.circle` icon
   with no action yet (`action.info` in `lang/en_us.json` and

@@ -2277,15 +2277,17 @@ fn sync_image_fit_factor(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) -> b
   false
 }
 
-/// Apply the image zoom factor. Fit mode never sets an explicit picture
-/// size: `Contain` plus `can_shrink` keeps the picture inside the viewport
-/// on every resize. An explicit size would turn the page into scrollable
-/// overflow clipped by the window corners. Manual zoom sets an explicit
-/// size so the scrolled window scrolls past the viewport.
+/// Apply the image zoom factor. Fit mode keeps the whole picture visible
+/// at any window size: scrollbars stay off so the viewport always
+/// constrains the picture, and `Contain` plus `can_shrink` scales it down
+/// into the viewport on every resize. Manual zoom sets an explicit size
+/// so the scrolled window scrolls past the viewport.
 fn apply_image_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   if state.borrow().img_fit {
+    widgets.img_scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
     widgets.img_picture.set_size_request(-1, -1);
   } else {
+    widgets.img_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     let zoom = state.borrow().img_zoom;
     match image_base_size(state) {
       Some((base_width, base_height)) => {
