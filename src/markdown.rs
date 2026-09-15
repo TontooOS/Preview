@@ -99,7 +99,7 @@ fn ensure_tags(buffer: &gtk::TextBuffer) {
   ensure("h2", &[("weight", 700.into()), ("scale", 1.35.into())]);
   ensure("h3", &[("weight", 700.into()), ("scale", 1.15.into())]);
   ensure("bold", &[("weight", 700.into())]);
-  ensure("italic", &[("style", 2.into())]);
+  ensure("italic", &[("style", gtk::pango::Style::Italic.into())]);
   ensure("mono", &[("family", "Monospace".into())]);
   ensure("code_bg", &[("background", "#00000022".into())]);
   ensure("dim", &[("foreground", "#888888".into())]);
