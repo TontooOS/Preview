@@ -960,7 +960,12 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     let state = state.clone();
     let widgets = widgets.clone();
     edit_buffer.connect_changed(move |buf| {
-      let mut st = state.borrow_mut();
+      // Programmatic `set_text` from `refresh_body` holds a `state` borrow
+      // while this signal fires (GTK signals are synchronous): never panic
+      // on re-entrancy, just ignore the programmatic change.
+      let Ok(mut st) = state.try_borrow_mut() else {
+        return;
+      };
       if st.mode != Mode::Edit {
         return;
       }
@@ -2296,9 +2301,15 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   // Edit buffer always holds the raw text (saved content, or the current
   // unsaved edits when dirty). Only reset it when it is not dirty so
   // typing is never clobbered by a rebuild.
-  if !st.dirty {
-    // Block the changed handler side effects by comparing in handler.    widgets.edit_buffer.set_text(&st.content);
+  // NOTE: `set_text` fires `changed` synchronously, and the handler borrows
+  // `state` -> drop the borrow first so the handler never re-enters it.
+  // The handler compares against saved content and ignores programmatic sync.
+  let synced = if !st.dirty { Some(st.content.clone()) } else { None };
+  drop(st);
+  if let Some(text) = synced {
+    widgets.edit_buffer.set_text(&text);
   }
+  let st = state.borrow();
   if st.kind == FileKind::Markdown && st.mode == Mode::Preview {
     // Markdown preview renders the current buffer (saved or edited).
     let text = if st.dirty {
