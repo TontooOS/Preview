@@ -126,15 +126,24 @@ Don't Save). The dialog is the native GTK file chooser.
 
 | Syntax | Rendering |
 |---|---|
-| `#`, `##`, `###` | Scaled bold headings |
-| `-`, `*`, `1.` | Bullet or numbered list rows |
-| `> ` | Indented italic quote |
-| `**bold**` | Bold tag |
-| `*italic*` | Italic tag |
+| `#` .. `######` | Scaled bold headings (`h1` .. `h6`) |
+| `-`, `*`, `+`, `1.`, `1)` | Bullet or numbered list rows, nested by indent |
+| `- [ ]`, `- [x]` | Task list with empty or checked box |
+| `>`, `>>` | Indented italic quote (nesting stripped) |
+| `\| a \| b \|` plus separator row | Monospace grid, bold header, separator skipped |
+| `: ...` | Indented definition line |
+| `[^id]: ...` / `[^id]` | Dim footnote marker plus text |
+| `\#`, `\*`, `\_`, `\|`, ... | Backslash escapes render literally, never as syntax |
+| `**bold**`, `__bold__` | Bold tag |
+| `*italic*`, `_italic_` | Italic tag (`_` not inside words) |
+| `***both***` | Bold plus italic tags |
+| `~~strike~~` | Strikethrough tag |
 | `` `code` `` | Monospace tag with background |
 | ` ``` ` | Fenced block in monospace |
 | `[text](url)` | Bold label plus dim URL |
-| `---` | Rule line |
+| `![alt](url)` | Bold alt text plus dim URL |
+| `<https://...>` | Underlined link tag |
+| `---`, `***`, `___` | Rule line |
 
 Edit mode always shows the raw Markdown source.
 
