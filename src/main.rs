@@ -46,6 +46,10 @@ fn main() {
   let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
   // No system decoration bar: traffic lights are drawn directly on the window.
   app.no_window_bar();
+  // No outer scroll wrapper: every content page has its own ScrolledWindow,
+  // so the header (traffic lights, title, toolbar) stays fixed while the
+  // page content scrolls underneath it.
+  app.no_scroll();
   // Exact default size: bypass content-natural-size and half-monitor cap.
   app.force_size(939, 692);
   app.auto_color_scheme();

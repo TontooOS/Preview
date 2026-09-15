@@ -64,10 +64,20 @@ Rules:
 ```rust
 let mut app = App::with_delegate(title, 939, 692, PreviewDelegate { initial });
 app.no_window_bar(); // traffic lights are drawn directly on the window
+app.no_scroll(); // every page scrolls internally, header stays fixed
 app.force_size(939, 692); // exact size: bypass natural-size and half-monitor cap
 app.auto_color_scheme(); // live Dark/Light follow
 app.run();
 ```
+
+Rules:
+
+- The header (traffic lights, file name, edit/save buttons, icon toolbar)
+  is outside every scroll container and never scrolls away.
+- Every content page owns its scroll container (`edit_scroll`,
+  `preview_scroll`, `pdf_scroll`, `img_scroll`, `doc_scroll`,
+  `pres_scroll`, `sheet_scroll`); compact pages (empty, unsupported,
+  audio, video) fit the window and need none.
 
 ## File Handling
 
