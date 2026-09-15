@@ -152,10 +152,8 @@ struct Widgets {
   page_label: gtk::Label,
   fit_btn: gtk::ToggleButton,
   pdf_scroll: gtk::ScrolledWindow,
-  pdf_view: gtk::TextView,
-  pdf_buffer: gtk::TextBuffer,
+  pdf_page_box: gtk::Box,
   pdf_error: gtk::Label,
-  pdf_css: gtk::CssProvider,
   pdf_editor_box: gtk::Box,
   img_bar: gtk::Box,
   img_fit_btn: gtk::ToggleButton,
@@ -497,22 +495,14 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   pdf_bar.append(&next_btn);
   pdf_bar.append(&fit_btn);
   pdf_box.append(&pdf_bar);
-  let pdf_buffer = gtk::TextBuffer::new(None);
-  let pdf_view = gtk::TextView::with_buffer(&pdf_buffer);
-  pdf_view.set_editable(false);
-  pdf_view.set_cursor_visible(false);
-  pdf_view.set_wrap_mode(gtk::WrapMode::WordChar);
-  pdf_view.set_hexpand(true);
-  pdf_view.set_vexpand(true);
-  pdf_view.set_left_margin(16);
-  pdf_view.set_right_margin(16);
-  pdf_view.set_top_margin(12);
-  pdf_view.set_bottom_margin(12);
-  pdf_view.add_css_class("pdf-page");
+  // Container for the PDFKit PdfPreview widget (rebuilt on page/zoom change).
+  let pdf_page_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+  pdf_page_box.set_hexpand(true);
+  pdf_page_box.set_vexpand(true);
   let pdf_scroll = gtk::ScrolledWindow::new();
   pdf_scroll.set_hexpand(true);
   pdf_scroll.set_vexpand(true);
-  pdf_scroll.set_child(Some(&pdf_view));
+  pdf_scroll.set_child(Some(&pdf_page_box));
   pdf_box.append(&pdf_scroll);
   let pdf_error = gtk::Label::new(Some(""));
   pdf_error.add_css_class("dim-label");
@@ -876,16 +866,6 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
   stack.set_margin_bottom(16);
 
   apply_css(&root);
-  // Dedicated display provider for the PDF zoom level (higher priority
-  // than the base style so the scaled font size wins).
-  let pdf_css = gtk::CssProvider::new();
-  if let Some(display) = gtk::gdk::Display::default() {
-    gtk::style_context_add_provider_for_display(
-      &display,
-      &pdf_css,
-      gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
-    );
-  }
 
   let widgets = Rc::new(Widgets {
     title_box: title_box.clone(),
@@ -916,10 +896,8 @@ fn build_ui(initial: Option<PathBuf>) -> gtk::Box {
     page_label: page_label.clone(),
     fit_btn: fit_btn.clone(),
     pdf_scroll: pdf_scroll.clone(),
-    pdf_view: pdf_view.clone(),
-    pdf_buffer: pdf_buffer.clone(),
+    pdf_page_box: pdf_page_box.clone(),
     pdf_error: pdf_error.clone(),
-    pdf_css: pdf_css.clone(),
     pdf_editor_box: pdf_editor_box.clone(),
     img_bar: img_bar.clone(),
     img_fit_btn: img_fit_btn.clone(),
@@ -2350,11 +2328,11 @@ fn refresh_body(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
 /// Render the current PDF page (lazy: only the current page is extracted).
 /// Broken PDFs (missing, corrupt, encrypted) show an error label instead.
 fn refresh_pdf(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
-  let (total, page, reason, fit) = {
+  let (total, page, reason, fit, pathClone) = {
     let st = state.borrow();
     let total = st.pdf.as_ref().map(|d| d.page_count()).unwrap_or(0);
     let page = model::clamp_page(st.pdf_page, total);
-    (total, page, st.error.clone(), st.pdf_fit)
+    (total, page, st.error.clone(), st.pdf_fit, st.path.clone())
   };
   state.borrow_mut().pdf_page = page;
   widgets.fit_btn.set_active(fit);
@@ -2375,41 +2353,37 @@ fn refresh_pdf(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
   widgets.pdf_scroll.set_visible(true);
   widgets.pdf_error.set_visible(false);
 
-  let text = state
-    .borrow()
-    .pdf
-    .as_ref()
-    .and_then(|doc| doc.page_text(page).ok())
-    .unwrap_or_default();
-  if text.trim().is_empty() {
-    widgets.pdf_buffer.set_text(&lang::t("pdf.empty_page"));
-  } else {
-    widgets.pdf_buffer.set_text(text.trim());
+  // Render the page as an image using PDFKit (Poppler backend).
+  // Clear previous content.
+  while let Some(child) = widgets.pdf_page_box.first_child() {
+    widgets.pdf_page_box.remove(&child);
   }
+  if let Some(path) = pathClone.as_ref() {
+    let is_dark = crate::UIKit::app::current_color_scheme()
+      .map(|s| s == crate::UIKit::app::ColorScheme::Dark)
+      .unwrap_or(false);
+    let scale = state.borrow().pdf_zoom;
+    let page_num = (page + 1) as u32;
+    let preview = PDFKit::PdfPreview::new(path)
+      .page(page_num)
+      .scale(scale)
+      .dark(is_dark);
+    let preview_view = crate::UIKit::view::View::new(preview)
+      .with_frame(0.0, 0.0, 595.0 * scale as f32, 842.0 * scale as f32);
+    widgets.pdf_page_box.append(&preview_view.to_gtk());
+  }
+
   widgets.page_label.set_text(&lang::t_with(
     "pdf.page",
     &[("page", &(page + 1).to_string()), ("total", &total.to_string())],
   ));
   widgets.prev_btn.set_sensitive(page > 0);
   widgets.next_btn.set_sensitive(page + 1 < total);
-  apply_pdf_zoom(state, widgets);
 }
 
-/// Apply the PDF zoom level (SF Pro Display font scale) and fit-width mode.
+/// Apply the PDF zoom level by re-rendering the page at the new scale.
 fn apply_pdf_zoom(state: &Rc<RefCell<State>>, widgets: &Rc<Widgets>) {
-  let (zoom, fit) = {
-    let st = state.borrow();
-    (st.pdf_zoom, st.pdf_fit)
-  };
-  let size = (13.0 * zoom).clamp(6.0, 48.0);
-  widgets.pdf_css.load_from_string(&format!(
-    "textview.pdf-page {{ font-family: '{SF_PRO}', 'SF Pro Text', sans-serif; font-size: {size:.1}pt; }}"
-  ));
-  widgets.pdf_view.set_wrap_mode(if fit {
-    gtk::WrapMode::WordChar
-  } else {
-    gtk::WrapMode::None
-  });
+  refresh_pdf(state, widgets);
 }
 
 /// Render the current image page. Raster formats are decoded once with the
