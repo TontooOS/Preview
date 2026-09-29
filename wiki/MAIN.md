@@ -9,7 +9,7 @@ file dialog. It follows the live system color scheme and loads `en_us` /
 `de_de` strings from `lang/`.
 
 - Repository: https://github.com/TontooOS/TontooOS
-- License: TCL v26.1
+- License: TCL v27.0
 - Version: 27.0.0
 
 ## Feature Index
